@@ -78,10 +78,14 @@ async function request(path, options = {}) {
   return data
 }
 
-export async function sendChatMessage(message, usedSuggestionIds = []) {
+export async function sendChatMessage(message, usedSuggestionIds = [], sessionId = null) {
   return request('/chat', {
     method: 'POST',
-    body: JSON.stringify({ message, used_suggestion_ids: usedSuggestionIds }),
+    body: JSON.stringify({
+      message,
+      used_suggestion_ids: usedSuggestionIds,
+      session_id: sessionId,
+    }),
   })
 }
 
@@ -211,8 +215,32 @@ export async function fetchAdminSlots(date) {
   return request(`/admin/slots?date=${encodeURIComponent(date)}`)
 }
 
-export async function fetchAdminChatLogs(limit = 200) {
-  return request(`/admin/chat-logs?limit=${limit}`)
+export async function fetchAdminChatLogs({ page = 1, perPage = 10, email = '' } = {}) {
+  const params = new URLSearchParams({ page: String(page), per_page: String(perPage) })
+  if (email.trim()) params.set('email', email.trim().toLowerCase())
+  return request(`/admin/chat-logs?${params.toString()}`)
+}
+
+// --- Chat session ---
+
+export async function startChatSession() {
+  return request('/chat/session/start', { method: 'POST' })
+}
+
+export async function endChatSession(sessionId) {
+  return request('/chat/session/end', {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId }),
+  })
+}
+
+export async function fetchSessionMessages(sessionId) {
+  return request(`/chat/session/${encodeURIComponent(sessionId)}/messages`)
+}
+
+export async function fetchRecentExchanges(sessionId = null) {
+  const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
+  return request(`/chat/recent${query}`)
 }
 
 export { getToken }

@@ -21,6 +21,7 @@ from data_loader import (
     write_ingestion_meta,
     compute_excel_hash,
 )
+from context_service import VEHICLE_MODELS, detect_topic, detect_vehicle, normalize_message
 from embeddings import embed_texts, embed_query
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,22 @@ SEARCH_STOPWORDS = {
     "what",
     "when",
     "which",
+    "how",
+    "many",
+    "much",
+    "this",
+    "that",
+    "with",
+}
+
+TOPIC_SIGNALS: dict[str, list[str]] = {
+    "price": ["price", "cost", "lakh", "rupee", "starting"],
+    "mileage": ["mileage", "kmpl", "km/l", "fuel efficiency", "fuel"],
+    "seats": ["seat", "seater", "seating", "capacity"],
+    "compare": ["compare", "comparison", "versus", " vs "],
+    "features": ["feature", "specification", "spec"],
+    "booking": ["test drive", "book", "booking", "slot", "schedule"],
+    "service": ["warranty", "service"],
 }
 
 
@@ -124,13 +141,79 @@ class FAQVectorStore:
         logger.info("✓ Ingestion complete. %d documents stored.", self.document_count)
         self._initialized = True
 
+    def _extract_vehicles(self, text: str) -> list[str]:
+        normalized = normalize_message(text)
+        lower = normalized.lower()
+        found: list[str] = []
+        for model in sorted(VEHICLE_MODELS, key=len, reverse=True):
+            if model in lower:
+                name = detect_vehicle(model)
+                if name and name not in found:
+                    found.append(name)
+        v = detect_vehicle(normalized)
+        if v and v not in found:
+            found.append(v)
+        return found
+
+    def _topic_matches(self, topic: str, question: str, answer: str) -> bool:
+        if not topic:
+            return True
+        blob = f"{question} {answer}".lower()
+        signals = TOPIC_SIGNALS.get(topic, [])
+        return any(sig in blob for sig in signals)
+
+    def _vehicle_matches(
+        self, vehicles: list[str], question: str, answer: str, query_topic: str
+    ) -> bool:
+        if not vehicles:
+            return True
+        blob = f"{question} {answer}".lower()
+        if query_topic == "compare":
+            return all(v.lower() in blob for v in vehicles)
+        return any(v.lower() in blob for v in vehicles)
+
+    def _pick_best_candidate(self, query: str, results: dict) -> dict | None:
+        query_topic = detect_topic(query)
+        query_vehicles = self._extract_vehicles(query)
+        candidates: list[tuple[float, float, dict]] = []
+
+        for i, dist in enumerate(results["distances"][0]):
+            similarity = 1.0 - dist
+            meta = results["metadatas"][0][i] or {}
+            question = meta.get("question", results["documents"][0][i])
+            answer = meta.get("answer", "")
+
+            if not self._topic_matches(query_topic, question, answer):
+                continue
+            if not self._vehicle_matches(query_vehicles, question, answer, query_topic):
+                continue
+
+            vehicle_score = 0.5
+            if query_vehicles:
+                blob = question.lower()
+                vehicle_score = sum(1 for v in query_vehicles if v.lower() in blob) / len(
+                    query_vehicles
+                )
+
+            combined = (similarity * 0.65) + (vehicle_score * 0.35)
+            candidates.append((combined, similarity, meta))
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        _combined, best_sim, best_meta = candidates[0]
+        if best_sim < SIMILARITY_THRESHOLD:
+            return None
+        return best_meta
+
     def search(self, query: str) -> dict:
         """
         Perform semantic similarity search and return stored answer only.
 
         Returns dict with keys: answer, found, similarity (optional).
         """
-        query = query.strip()
+        query = normalize_message(query.strip())
         if not query:
             return {"answer": NO_DATA_MESSAGE, "found": False}
 
@@ -142,9 +225,10 @@ class FAQVectorStore:
 
         try:
             query_embedding = embed_query(query)
+            n_results = min(12, self.document_count)
             results = self._collection.query(
                 query_embeddings=[query_embedding],
-                n_results=1,
+                n_results=n_results,
                 include=["metadatas", "distances", "documents"],
             )
         except Exception as exc:
@@ -158,24 +242,14 @@ class FAQVectorStore:
         if not results["ids"] or not results["ids"][0]:
             return {"answer": NO_DATA_MESSAGE, "found": False}
 
-        distance = results["distances"][0][0]
-        # Cosine distance in Chroma: 0 = identical, 2 = opposite
-        similarity = 1.0 - distance
+        best_meta = self._pick_best_candidate(query, results)
+        if not best_meta:
+            return {"answer": NO_DATA_MESSAGE, "found": False}
 
-        if similarity < SIMILARITY_THRESHOLD:
-            return {
-                "answer": NO_DATA_MESSAGE,
-                "found": False,
-                "similarity": round(similarity, 4),
-            }
-
-        metadata = results["metadatas"][0][0]
-        stored_answer = metadata.get("answer", NO_DATA_MESSAGE)
-
+        stored_answer = best_meta.get("answer", NO_DATA_MESSAGE)
         return {
             "answer": stored_answer,
             "found": True,
-            "similarity": round(similarity, 4),
         }
 
     def _lexical_search(self, query: str) -> dict:
@@ -191,10 +265,19 @@ class FAQVectorStore:
 
         best_score = 0.0
         best_metadata = None
+        query_topic = detect_topic(query)
+        query_vehicles = self._extract_vehicles(query)
 
         for document, metadata in zip(documents, metadatas):
             question = (metadata or {}).get("question") or document or ""
+            answer = (metadata or {}).get("answer") or ""
             question_lower = question.lower()
+
+            if query_topic and not self._topic_matches(query_topic, question, answer):
+                continue
+            if not self._vehicle_matches(query_vehicles, question, answer, query_topic):
+                continue
+
             question_terms = {
                 term
                 for term in re.findall(r"[a-z0-9]+", question_lower)

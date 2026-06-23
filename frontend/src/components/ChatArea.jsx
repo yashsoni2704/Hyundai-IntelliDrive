@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
 import WelcomeScreen from './WelcomeScreen'
 import LoadingIndicator from './LoadingIndicator'
@@ -11,8 +12,16 @@ export default function ChatArea({
   onBookSlot,
   onLoginRequired,
 }) {
+  const scrollRef = useRef(null)
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+  }, [messages, isLoading])
+
   return (
-    <div className="chat-area">
+    <div className="chat-area" ref={scrollRef}>
       <div className="chat-messages">
         {messages.length === 0 && !isLoading && (
           <WelcomeScreen onSuggestionClick={onSuggestionClick} />

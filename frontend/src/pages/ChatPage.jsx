@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
 import ChatArea from '../components/ChatArea'
@@ -6,26 +6,31 @@ import ChatInput from '../components/ChatInput'
 import KnowledgePanel from '../components/KnowledgePanel'
 import AuthModal from '../components/AuthModal'
 import BookingModal from '../components/BookingModal'
+import PastExchangeView from '../components/PastExchangeView'
 import { useAuth } from '../contexts/AuthContext'
-import { useChatHistory } from '../hooks/useChatHistory'
+import { useSessionChat } from '../hooks/useSessionChat'
 import { useSuggestionTracker } from '../hooks/useSuggestionTracker'
 import { sendChatMessage, fetchStats, createBooking } from '../services/api'
 
 export default function ChatPage() {
-  const { user, isAuthenticated } = useAuth()
+  const { user, isAuthenticated, logout } = useAuth()
   const userId = user?.id ?? null
   const {
-    conversations,
-    activeConversation,
-    activeId,
-    startNewChat,
-    selectConversation,
-    clearAllHistory,
-    addMessage,
-    ensureActiveConversation,
-  } = useChatHistory(userId)
+    sessionId,
+    messages: sessionMessages,
+    pastExchanges,
+    viewingPast,
+    viewingPastId,
+    loadingSession,
+    addMessage: addSessionMessage,
+    refreshRecent,
+    selectPastExchange,
+    backToCurrentChat,
+    endSession,
+  } = useSessionChat(userId, isAuthenticated)
   const { markUsed, getUsedIds } = useSuggestionTracker(userId)
 
+  const [guestMessages, setGuestMessages] = useState([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -37,13 +42,14 @@ export default function ChatPage() {
   const [showAuth, setShowAuth] = useState(false)
   const [showBooking, setShowBooking] = useState(false)
   const [bookingVehicle, setBookingVehicle] = useState('General')
-  const bottomRef = useRef(null)
 
-  const messages = activeConversation?.messages ?? []
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isLoading])
+  const messages = isAuthenticated ? sessionMessages : guestMessages
+  const addMessage = isAuthenticated ? addSessionMessage : (role, content, meta = {}) => {
+    setGuestMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role, content, ...meta, timestamp: Date.now() },
+    ])
+  }
 
   const handleToggleSidebar = useCallback(() => {
     const isMobile = window.matchMedia('(max-width: 768px)').matches
@@ -73,6 +79,11 @@ export default function ChatPage() {
     if (showKnowledge) loadStats()
   }, [showKnowledge, loadStats])
 
+  const handleLogout = useCallback(async () => {
+    await endSession()
+    logout()
+  }, [endSession, logout])
+
   const requireAuth = useCallback((action) => {
     if (!isAuthenticated) {
       setShowAuth(true)
@@ -92,25 +103,31 @@ export default function ChatPage() {
   const handleSend = useCallback(
     async (text, suggestionItem = null) => {
       const message = (text ?? input).trim()
-      if (!message || isLoading) return
+      if (!message || isLoading || viewingPastId) return
 
       if (suggestionItem) {
         markUsed(suggestionItem)
       }
 
-      ensureActiveConversation()
       setInput('')
       addMessage('user', message)
       setIsLoading(true)
 
       try {
-        const result = await sendChatMessage(message, getUsedIds())
+        const result = await sendChatMessage(
+          message,
+          getUsedIds(),
+          isAuthenticated ? sessionId : null,
+        )
         addMessage('assistant', result.answer, {
           found: result.found,
           response_type: result.response_type || 'faq',
           available_slots: result.available_slots || [],
           suggestions: result.suggestions || [],
         })
+        if (isAuthenticated) {
+          await refreshRecent()
+        }
       } catch (error) {
         const errorMessage = error.message || 'Unable to connect to the knowledge base. Please try again.'
         addMessage('assistant', errorMessage, { error: true })
@@ -118,17 +135,26 @@ export default function ChatPage() {
         setIsLoading(false)
       }
     },
-    [input, isLoading, ensureActiveConversation, addMessage, getUsedIds, markUsed],
+    [
+      input,
+      isLoading,
+      viewingPastId,
+      addMessage,
+      getUsedIds,
+      markUsed,
+      isAuthenticated,
+      sessionId,
+      refreshRecent,
+    ],
   )
 
   const handleBookingComplete = useCallback((result) => {
-    ensureActiveConversation()
     addMessage(
       'assistant',
       `Your test drive is confirmed for ${result.date} at ${result.slot_label} (${result.vehicle_model}).`,
       { suggestions: [{ label: 'View my bookings', action: 'my_bookings', id: 'my_bookings' }] },
     )
-  }, [ensureActiveConversation, addMessage])
+  }, [addMessage])
 
   const handleBookSlot = useCallback(
     async (slot) => {
@@ -140,7 +166,6 @@ export default function ChatPage() {
         return
       }
 
-      ensureActiveConversation()
       try {
         const result = await createBooking({
           date: slot.date,
@@ -161,7 +186,7 @@ export default function ChatPage() {
         }
       }
     },
-    [isAuthenticated, ensureActiveConversation, bookingVehicle, addMessage, handleBookingComplete],
+    [isAuthenticated, bookingVehicle, addMessage, handleBookingComplete],
   )
 
   const handleLoginRequired = useCallback(() => {
@@ -196,21 +221,15 @@ export default function ChatPage() {
       <Sidebar
         isOpen={sidebarOpen}
         isCollapsed={sidebarCollapsed}
-        conversations={conversations}
-        activeId={activeId}
-        onNewChat={() => {
-          startNewChat()
+        pastExchanges={isAuthenticated ? pastExchanges : []}
+        viewingPastId={viewingPastId}
+        onSelectPastExchange={(id) => {
+          selectPastExchange(id)
           setSidebarOpen(false)
         }}
-        onSelectConversation={(id) => {
-          selectConversation(id)
+        onBackToCurrentChat={() => {
+          backToCurrentChat()
           setSidebarOpen(false)
-        }}
-        onClearHistory={() => {
-          if (window.confirm('Clear all conversation history?')) {
-            clearAllHistory()
-            setSidebarOpen(false)
-          }
         }}
         onToggleCollapse={handleToggleSidebar}
         onCloseMobile={() => setSidebarOpen(false)}
@@ -225,6 +244,7 @@ export default function ChatPage() {
           onToggleSidebar={handleToggleSidebar}
           onOpenAuth={() => setShowAuth(true)}
           onOpenBookings={() => requireAuth(() => setShowBooking(true))}
+          onLogout={handleLogout}
         />
 
         <div className="chat-body">
@@ -237,23 +257,28 @@ export default function ChatPage() {
             />
           )}
 
-          <ChatArea
-            messages={messages}
-            isLoading={isLoading}
-            onSuggestionClick={(text) => handleSend(text)}
-            onSuggestionAction={handleSuggestionAction}
-            isAuthenticated={isAuthenticated}
-            onBookSlot={handleBookSlot}
-            onLoginRequired={handleLoginRequired}
-          />
-          <div ref={bottomRef} />
+          {viewingPast ? (
+            <PastExchangeView exchange={viewingPast} onBack={backToCurrentChat} />
+          ) : (
+            <ChatArea
+              messages={messages}
+              isLoading={isLoading || loadingSession}
+              onSuggestionClick={(text) => handleSend(text)}
+              onSuggestionAction={handleSuggestionAction}
+              isAuthenticated={isAuthenticated}
+              onBookSlot={handleBookSlot}
+              onLoginRequired={handleLoginRequired}
+            />
+          )}
 
-          <ChatInput
-            value={input}
-            onChange={setInput}
-            onSend={() => handleSend()}
-            disabled={isLoading}
-          />
+          {!viewingPast && (
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSend={() => handleSend()}
+              disabled={isLoading || loadingSession}
+            />
+          )}
         </div>
       </main>
 

@@ -76,12 +76,30 @@ def get_follow_up_suggestions(
     answer: str,
     found: bool,
     used_suggestion_ids: list[str] | None = None,
+    context: dict | None = None,
 ) -> list[dict]:
     """Return up to 4 contextual suggestions, excluding ones the user already used."""
     used_ids = set(used_suggestion_ids or [])
+    ctx = context or {}
+    vehicle = (ctx.get("last_vehicle") or "").lower()
     combined = f"{query} {answer}"
+    if vehicle and vehicle not in combined.lower():
+        combined = f"{combined} {vehicle}"
     suggestions: list[dict] = []
     seen_ids: set[str] = set()
+
+    if vehicle:
+        vehicle_title = vehicle.title()
+        vehicle_items = [
+            {"label": f"Book {vehicle_title} test drive", "action": "book_test_drive", "vehicle": vehicle_title, "id": f"book_{vehicle}"},
+            {"label": f"{vehicle_title} mileage", "action": "chat", "query": f"What is the mileage of Hyundai {vehicle_title}?", "id": f"{vehicle}_mileage"},
+            {"label": f"{vehicle_title} price", "action": "chat", "query": f"What is the price of Hyundai {vehicle_title}?", "id": f"{vehicle}_price"},
+        ]
+        for item in vehicle_items:
+            sid = _suggestion_id(item)
+            if sid not in seen_ids and sid not in used_ids:
+                suggestions.append(dict(item))
+                seen_ids.add(sid)
 
     for keywords, items in TOPIC_SUGGESTIONS:
         if _text_contains(combined, keywords):

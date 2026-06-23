@@ -18,6 +18,22 @@ from models import User
 from routers.auth_router import router as auth_router
 from routers.bookings_router import router as bookings_router
 from routers.admin_router import router as admin_router
+from context_service import (
+    clarification_message,
+    detect_vehicle,
+    enrich_search_query,
+    needs_clarification,
+    normalize_message,
+    prepare_clarification_context,
+    resolve_query,
+)
+from routers.session_router import router as session_router
+from session_service import (
+    apply_exchange_to_session,
+    get_session,
+    get_session_context,
+    save_session_context,
+)
 from slot_intent import is_slot_availability_query
 from suggestions import get_follow_up_suggestions
 
@@ -61,11 +77,13 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(bookings_router)
 app.include_router(admin_router)
+app.include_router(session_router)
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User question")
     used_suggestion_ids: list[str] = Field(default_factory=list)
+    session_id: str | None = Field(default=None, description="Active chat session for context")
 
 
 class SuggestionItem(BaseModel):
@@ -90,6 +108,8 @@ class ChatResponse(BaseModel):
     response_type: str = "faq"
     suggestions: list[SuggestionItem] = []
     available_slots: list[AvailableSlotItem] = []
+    resolved_query: str | None = None
+    context: dict | None = None
 
 
 class StatsResponse(BaseModel):
@@ -137,13 +157,58 @@ async def chat(
                 detail="Knowledge base is initializing. Please try again in a moment.",
             )
 
-        message = request.message.strip()
+        original = normalize_message(request.message.strip())
         used_ids = request.used_suggestion_ids
+        session_ctx: dict = {}
+        session_id = request.session_id
+        message = original
 
-        if is_slot_availability_query(message):
+        if current_user and session_id:
+            session = get_session(db, current_user, session_id)
+            session_ctx = get_session_context(session)
+
+        if needs_clarification(original, session_ctx):
+            answer = clarification_message(original, session_ctx)
+            suggestions = get_follow_up_suggestions(
+                original, answer, False, used_ids, session_ctx
+            )
+            if current_user and session_id:
+                session_ctx = prepare_clarification_context(
+                    dict(session_ctx), original
+                )
+                save_session_context(db, session, session_ctx)
+            response = ChatResponse(
+                answer=answer,
+                found=False,
+                response_type="clarification",
+                suggestions=suggestions,
+                context=session_ctx if current_user and session_id else None,
+            )
+            log_chat_interaction(
+                db,
+                query=original,
+                answer=answer,
+                found=False,
+                response_type="clarification",
+                user=current_user,
+                session_id=session_id,
+            )
+            return response
+
+        if current_user and session_id:
+            message = resolve_query(original, session_ctx)
+        else:
+            message = enrich_search_query(original, session_ctx)
+
+        # Slot intent only on what the user actually typed (not context-expanded text)
+        if is_slot_availability_query(original):
             slots_data = get_next_available_slots(db)
             suggestions = get_follow_up_suggestions(
-                message, slots_data["message"], slots_data["total_found"] > 0, used_ids
+                original,
+                slots_data["message"],
+                slots_data["total_found"] > 0,
+                used_ids,
+                session_ctx,
             )
             answer = slots_data["message"]
             response = ChatResponse(
@@ -152,20 +217,35 @@ async def chat(
                 response_type="slots",
                 available_slots=slots_data["slots"],
                 suggestions=suggestions,
+                resolved_query=message if message != original else None,
             )
             log_chat_interaction(
                 db,
-                query=message,
+                query=original,
                 answer=answer,
                 found=response.found,
                 response_type="slots",
                 user=current_user,
+                session_id=session_id,
             )
+            if current_user and session_id:
+                session = get_session(db, current_user, session_id)
+                session_ctx = apply_exchange_to_session(
+                    db, session, original, answer
+                )
+                response.context = session_ctx
             return response
 
         result = vector_store.search(message)
+        if not result["found"]:
+            alt = enrich_search_query(original, session_ctx)
+            if alt != message:
+                result = vector_store.search(alt)
+                if result["found"]:
+                    message = alt
+
         suggestions = get_follow_up_suggestions(
-            message, result["answer"], result["found"], used_ids
+            original, result["answer"], result["found"], used_ids, session_ctx
         )
 
         response = ChatResponse(
@@ -173,15 +253,23 @@ async def chat(
             found=result["found"],
             response_type="faq",
             suggestions=suggestions,
+            resolved_query=message if message != original else None,
         )
         log_chat_interaction(
             db,
-            query=message,
+            query=original,
             answer=result["answer"],
             found=result["found"],
             response_type="faq",
             user=current_user,
+            session_id=session_id,
         )
+        if current_user and session_id:
+            session = get_session(db, current_user, session_id)
+            session_ctx = apply_exchange_to_session(
+                db, session, original, result["answer"]
+            )
+            response.context = session_ctx
         return response
     except HTTPException:
         raise

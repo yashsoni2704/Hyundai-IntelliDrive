@@ -93,6 +93,11 @@ def remove_booking(booking_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/chat-logs")
-def list_chat_logs(limit: int = 200, db: Session = Depends(get_db)):
-    """Monitor which user asked which query and what response was given."""
-    return {"logs": get_chat_logs(db, limit=min(limit, 500))}
+def list_chat_logs(
+    page: int = 1,
+    per_page: int = 10,
+    email: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Monitor user queries with pagination and optional email search."""
+    return get_chat_logs(db, page=page, per_page=per_page, email=email)

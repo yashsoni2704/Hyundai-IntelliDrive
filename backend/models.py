@@ -24,6 +24,7 @@ class User(Base):
 
     bookings: Mapped[list["Booking"]] = relationship("Booking", back_populates="user")
     chat_logs: Mapped[list["ChatLog"]] = relationship("ChatLog", back_populates="user")
+    chat_sessions: Mapped[list["ChatSession"]] = relationship("ChatSession", back_populates="user")
 
 
 class Booking(Base):
@@ -53,11 +54,28 @@ class OtpRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    context_json: Mapped[str] = mapped_column(Text, default="{}")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship("User", back_populates="chat_sessions")
+    chat_logs: Mapped[list["ChatLog"]] = relationship("ChatLog", back_populates="session")
+
+
 class ChatLog(Base):
     __tablename__ = "chat_logs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("chat_sessions.id"), nullable=True, index=True
+    )
     user_email: Mapped[str] = mapped_column(String(255), default="guest")
     user_name: Mapped[str] = mapped_column(String(120), default="")
     query: Mapped[str] = mapped_column(Text, nullable=False)
@@ -67,3 +85,4 @@ class ChatLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
     user: Mapped["User | None"] = relationship("User", back_populates="chat_logs")
+    session: Mapped["ChatSession | None"] = relationship("ChatSession", back_populates="chat_logs")

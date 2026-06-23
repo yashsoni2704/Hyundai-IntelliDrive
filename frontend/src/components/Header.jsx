@@ -1,7 +1,12 @@
 import { useAuth } from '../contexts/AuthContext'
 
-export default function Header({ onToggleSidebar, onOpenAuth, onOpenBookings }) {
+export default function Header({ onToggleSidebar, onOpenAuth, onOpenBookings, onLogout }) {
   const { user, logout, isAuthenticated } = useAuth()
+
+  const handleSignOut = () => {
+    if (onLogout) onLogout()
+    else logout()
+  }
 
   return (
     <header className="chat-header">
@@ -26,7 +31,7 @@ export default function Header({ onToggleSidebar, onOpenAuth, onOpenBookings }) 
               My bookings
             </button>
             <span className="header-user">{user.full_name || user.email}</span>
-            <button type="button" className="header-btn header-btn--ghost" onClick={logout}>
+            <button type="button" className="header-btn header-btn--ghost" onClick={handleSignOut}>
               Sign out
             </button>
           </>

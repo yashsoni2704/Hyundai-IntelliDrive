@@ -33,6 +33,11 @@ export default function AdminDashboard() {
   const [notice, setNotice] = useState('')
   const [chatLogs, setChatLogs] = useState([])
   const [logsLoading, setLogsLoading] = useState(false)
+  const [logsPage, setLogsPage] = useState(1)
+  const [logsTotalPages, setLogsTotalPages] = useState(1)
+  const [logsTotal, setLogsTotal] = useState(0)
+  const [emailSearch, setEmailSearch] = useState('')
+  const [emailFilter, setEmailFilter] = useState('')
 
   const isEditing = Boolean(form.id)
 
@@ -69,33 +74,40 @@ export default function AdminDashboard() {
     setSlotData(data)
   }, [])
 
-  const loadChatLogs = useCallback(async () => {
+  const loadChatLogs = useCallback(async (page = 1, email = emailFilter) => {
     setLogsLoading(true)
     try {
-      const data = await fetchAdminChatLogs()
+      const data = await fetchAdminChatLogs({ page, perPage: 10, email })
       setChatLogs(data.logs || [])
+      setLogsPage(data.page || page)
+      setLogsTotalPages(data.total_pages || 1)
+      setLogsTotal(data.total || 0)
     } catch (err) {
       setError(err.message || 'Unable to load chat logs')
     } finally {
       setLogsLoading(false)
     }
-  }, [])
+  }, [emailFilter])
 
   const refresh = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      await Promise.all([loadBookings(), loadDates(), loadChatLogs()])
+      await Promise.all([loadBookings(), loadDates()])
     } catch (err) {
       setError(err.message || 'Unable to load admin dashboard')
     } finally {
       setLoading(false)
     }
-  }, [loadBookings, loadDates, loadChatLogs])
+  }, [loadBookings, loadDates])
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  useEffect(() => {
+    loadChatLogs(logsPage, emailFilter)
+  }, [logsPage, emailFilter, loadChatLogs])
 
   useEffect(() => {
     loadSlots(selectedDate).catch((err) => setError(err.message || 'Unable to load slots'))
@@ -436,18 +448,62 @@ export default function AdminDashboard() {
         <section className="admin-panel admin-bookings-panel">
           <div className="admin-panel-header">
             <h2>Chat monitor</h2>
-            <button type="button" className="btn-secondary" onClick={loadChatLogs} disabled={logsLoading}>
+            <button type="button" className="btn-secondary" onClick={() => loadChatLogs(logsPage, emailFilter)} disabled={logsLoading}>
               {logsLoading ? 'Loading...' : 'Refresh logs'}
             </button>
           </div>
           <p className="form-hint" style={{ padding: '0 16px 12px' }}>
-            Track which user asked which query and what response was returned.
+            Track which user asked which query and what response was returned. Times shown in IST (India).
           </p>
+          <div className="admin-logs-toolbar">
+            <label className="admin-search-label">
+              Search by email
+              <input
+                type="email"
+                placeholder="e.g. user@gmail.com"
+                value={emailSearch}
+                onChange={(e) => setEmailSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setEmailFilter(emailSearch.trim())
+                    setLogsPage(1)
+                    loadChatLogs(1, emailSearch.trim())
+                  }
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setEmailFilter(emailSearch.trim())
+                setLogsPage(1)
+                loadChatLogs(1, emailSearch.trim())
+              }}
+            >
+              Search
+            </button>
+            {emailFilter && (
+              <button
+                type="button"
+                className="btn-link"
+                onClick={() => {
+                  setEmailSearch('')
+                  setEmailFilter('')
+                  setLogsPage(1)
+                  loadChatLogs(1, '')
+                }}
+              >
+                Clear filter
+              </button>
+            )}
+            <span className="admin-logs-count">{logsTotal} total entries</span>
+          </div>
           <div className="admin-table-wrap">
             <table className="admin-table admin-chat-logs-table">
               <thead>
                 <tr>
-                  <th>Time</th>
+                  <th>Time (IST)</th>
                   <th>User</th>
                   <th>Query</th>
                   <th>Response</th>
@@ -458,7 +514,7 @@ export default function AdminDashboard() {
               <tbody>
                 {chatLogs.map((log) => (
                   <tr key={log.id}>
-                    <td className="admin-log-time">{new Date(log.created_at).toLocaleString()}</td>
+                    <td className="admin-log-time">{log.created_at}</td>
                     <td>
                       <div>{log.user_name || (log.user_email === 'guest' ? 'Guest' : log.user_email)}</div>
                       <small className="admin-log-email">{log.user_email}</small>
@@ -476,6 +532,33 @@ export default function AdminDashboard() {
                 )}
               </tbody>
             </table>
+          </div>
+          <div className="admin-pagination">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={logsPage <= 1 || logsLoading}
+              onClick={() => setLogsPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+            <span>
+              Page {logsPage} of {logsTotalPages}
+              {logsTotal > 0 && (
+                <small className="admin-logs-page-hint">
+                  {' '}
+                  · showing {(logsPage - 1) * 10 + 1}–{Math.min(logsPage * 10, logsTotal)} of {logsTotal}
+                </small>
+              )}
+            </span>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={logsPage >= logsTotalPages || logsLoading}
+              onClick={() => setLogsPage((p) => p + 1)}
+            >
+              Next
+            </button>
           </div>
         </section>
       </main>

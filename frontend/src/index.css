@@ -1471,3 +1471,70 @@ p, li { margin: 0; }
   font-size: 12px;
   color: #A0A0A0;
 }
+
+.past-exchange-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.past-exchange-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #2a2a2a;
+  background: #1a1a1a;
+}
+
+.past-exchange-label {
+  font-size: 12px;
+  color: #888;
+}
+
+.admin-logs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.admin-search-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #aaa;
+  flex: 1;
+  min-width: 200px;
+}
+
+.admin-search-label input {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  color: #eee;
+}
+
+.admin-logs-count {
+  font-size: 12px;
+  color: #888;
+  margin-left: auto;
+}
+
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px;
+  border-top: 1px solid #2a2a2a;
+}
+
+.admin-pagination span {
+  font-size: 13px;
+  color: #aaa;
+}
