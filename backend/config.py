@@ -39,7 +39,8 @@ SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").replace(" ", "")
-SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "")
+# Optional override for SendGrid/Mailgun etc. Defaults to SMTP_USER (Gmail).
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL") or SMTP_USER
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"
 
 # API

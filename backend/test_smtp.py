@@ -2,19 +2,19 @@
 
 from email.mime.text import MIMEText
 
-from config import SMTP_FROM_EMAIL, SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
+from config import SMTP_HOST, SMTP_PASSWORD, SMTP_PORT, SMTP_USER
 from email_service import _send_via_smtp
 
 
 def main() -> None:
     print(f"Testing SMTP: {SMTP_USER} @ {SMTP_HOST}:{SMTP_PORT}")
-    if not all([SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL]):
+    if not all([SMTP_HOST, SMTP_USER, SMTP_PASSWORD]):
         print("ERROR: SMTP settings missing in backend/.env")
         return
 
     msg = MIMEText("Hyundai Assistant SMTP test — if you see this, email delivery works.")
     msg["Subject"] = "Hyundai Assistant — SMTP Test"
-    msg["From"] = SMTP_FROM_EMAIL
+    msg["From"] = SMTP_USER
     msg["To"] = SMTP_USER
 
     try:

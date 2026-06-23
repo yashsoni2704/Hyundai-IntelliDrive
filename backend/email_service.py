@@ -22,7 +22,7 @@ class EmailDeliveryError(Exception):
 
 
 def _smtp_configured() -> bool:
-    return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM_EMAIL)
+    return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD)
 
 
 def _otp_digits_row(otp_code: str) -> str:
