@@ -95,10 +95,11 @@ app = FastAPI(
 )
 logger.info("FastAPI app created — uvicorn will bind to PORT next")
 
-# CORS: allow browser frontend (port 5173) to call this API
+# CORS: local dev + Vercel frontend (direct calls if not using /api proxy)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in CORS_ORIGINS],
+    allow_origins=[origin.strip() for origin in CORS_ORIGINS if origin.strip()],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
