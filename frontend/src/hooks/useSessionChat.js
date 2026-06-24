@@ -1,3 +1,12 @@
+/**
+ * Manages chat session lifecycle for logged-in users.
+ *
+ * On login: startChatSession() → new session_id, blank messages, load recent sidebar history
+ * On refresh: restore session from sessionStorage + fetch messages from server
+ * On logout: endChatSession() → clear session
+ *
+ * sessionStorage keys: hyundai_chat_session_id, hyundai_chat_user_id
+ */
 import { useCallback, useEffect, useState } from 'react'
 import {
   endChatSession,

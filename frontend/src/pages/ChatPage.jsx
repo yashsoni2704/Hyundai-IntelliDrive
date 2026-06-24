@@ -1,3 +1,14 @@
+/**
+ * Main chat page — orchestrates the entire user chat experience.
+ *
+ * State sources:
+ *   useAuth — logged-in user + JWT
+ *   useSessionChat — session ID, messages, sidebar recent Q&As
+ *   useSuggestionTracker — which suggestion chips were already clicked
+ *
+ * Flow: user types → handleSend → sendChatMessage API → display answer + suggestions
+ * Guests use local guestMessages; logged-in users use server session + DB logs.
+ */
 import { useCallback, useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'

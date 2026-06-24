@@ -1,4 +1,12 @@
-"""Local embedding generation using BGE-M3 (sentence-transformers, no LLM)."""
+"""
+Local embedding generation using BGE-M3 (sentence-transformers).
+
+An embedding is a list of numbers (1024 floats) representing the MEANING of text.
+Similar questions produce similar vectors, enabling semantic search.
+
+We embed FAQ QUESTIONS at ingestion time and user QUERIES at search time.
+Answers are NOT embedded — they are stored in ChromaDB metadata and returned as-is.
+"""
 
 import logging
 from functools import lru_cache
@@ -12,7 +20,11 @@ logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=1)
 def get_embedding_model() -> SentenceTransformer:
-    """Load and cache the BGE-M3 embedding model."""
+    """
+    Load BGE-M3 once and cache it in memory.
+    @lru_cache ensures the heavy model download/load happens only on first call.
+    First run may take 2-5 minutes while Hugging Face downloads ~2GB.
+    """
     logger.info("Loading embedding model: %s (first run may take 2-5 minutes)...", EMBEDDING_MODEL)
     try:
         model = SentenceTransformer(EMBEDDING_MODEL)
@@ -24,7 +36,11 @@ def get_embedding_model() -> SentenceTransformer:
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Generate normalized embeddings for a list of texts."""
+    """
+    Convert a list of strings into embedding vectors.
+    normalize_embeddings=True → unit vectors so cosine similarity = dot product.
+    Used during FAQ ingestion (batch embed all questions).
+    """
     model = get_embedding_model()
     logger.debug("Generating embeddings for %d texts", len(texts))
     embeddings = model.encode(
@@ -32,9 +48,9 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         show_progress_bar=False,
         normalize_embeddings=True,
     )
-    return embeddings.tolist()
+    return embeddings.tolist()  # convert numpy array to plain Python list for ChromaDB
 
 
 def embed_query(query: str) -> list[float]:
-    """Generate embedding for a single user query."""
+    """Embed a single user query at search time."""
     return embed_texts([query])[0]

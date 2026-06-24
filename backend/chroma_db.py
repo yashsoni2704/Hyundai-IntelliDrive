@@ -1,4 +1,13 @@
-"""ChromaDB integration for persistent semantic FAQ retrieval."""
+"""
+ChromaDB integration for persistent semantic FAQ retrieval.
+
+Architecture:
+  - Each FAQ question = one vector document (atomic chunk, no text splitting)
+  - Answer stored in metadata only (returned verbatim, never generated)
+  - Search: embed query → top-12 cosine matches → filter by topic/vehicle → best match
+
+ChromaDB uses HNSW index with cosine space: distance = 1 - cosine_similarity.
+"""
 
 import logging
 import re
@@ -65,14 +74,23 @@ TOPIC_SIGNALS: dict[str, list[str]] = {
 
 
 class FAQVectorStore:
-    """Manages ChromaDB collection for Hyundai FAQ semantic search."""
+    """
+    Manages ChromaDB collection for Hyundai FAQ semantic search.
+
+    Lifecycle:
+      1. __init__ — connect to persistent ChromaDB folder
+      2. initialize() — ingest Excel FAQs if needed
+      3. search(query) — retrieve best matching stored answer
+    """
 
     def __init__(self) -> None:
         CHROMA_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
+        # PersistentClient saves vectors to disk (survives server restarts)
         self._client = chromadb.PersistentClient(
             path=str(CHROMA_PERSIST_DIR),
             settings=Settings(anonymized_telemetry=False),
         )
+        # cosine space: lower distance = more similar meaning
         self._collection = self._client.get_or_create_collection(
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
@@ -89,7 +107,10 @@ class FAQVectorStore:
         return self._initialized
 
     def initialize(self) -> None:
-        """Load FAQs into ChromaDB only when needed."""
+        """
+        Load FAQs into ChromaDB only when Excel changed or DB is empty.
+        Ingestion: embed each QUESTION → store vector + answer in metadata.
+        """
         logger.info("Initializing knowledge base from Excel...")
         faqs = load_faqs_from_excel()
         chroma_count = self.document_count
@@ -173,6 +194,11 @@ class FAQVectorStore:
         return any(v.lower() in blob for v in vehicles)
 
     def _pick_best_candidate(self, query: str, results: dict) -> dict | None:
+        """
+        Re-rank top ChromaDB hits using topic + vehicle filters.
+        Prevents wrong answers (e.g. Creta price when user asked mileage).
+        Score = 65% semantic similarity + 35% vehicle name overlap.
+        """
         query_topic = detect_topic(query)
         query_vehicles = self._extract_vehicles(query)
         candidates: list[tuple[float, float, dict]] = []
@@ -209,9 +235,10 @@ class FAQVectorStore:
 
     def search(self, query: str) -> dict:
         """
-        Perform semantic similarity search and return stored answer only.
+        Semantic similarity search — returns stored FAQ answer only (no LLM).
 
-        Returns dict with keys: answer, found, similarity (optional).
+        Returns: {"answer": str, "found": bool}
+        Falls back to keyword search if embedding model unavailable.
         """
         query = normalize_message(query.strip())
         if not query:
@@ -323,5 +350,5 @@ class FAQVectorStore:
         }
 
 
-# Singleton instance used by the API
+# Singleton — imported by app.py as `vector_store`
 vector_store = FAQVectorStore()

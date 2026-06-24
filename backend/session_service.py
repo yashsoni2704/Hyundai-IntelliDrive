@@ -1,4 +1,14 @@
-"""Chat session lifecycle and context persistence."""
+"""
+Chat session lifecycle and context persistence.
+
+A ChatSession is created on each login (POST /chat/session/start).
+It stores conversation context as JSON so follow-up questions work.
+
+Flow:
+  login → start_session() → blank context
+  each /chat → apply_exchange_to_session() → update last_vehicle, last_topic
+  logout → end_session() → mark session inactive
+"""
 
 from datetime import datetime, timezone
 
@@ -10,7 +20,7 @@ from models import ChatLog, ChatSession, User
 
 
 def start_session(db: Session, user: User) -> ChatSession:
-    """End any active session and create a fresh one."""
+    """End any active session and create a fresh one with empty context."""
     db.query(ChatSession).filter(
         ChatSession.user_id == user.id,
         ChatSession.is_active.is_(True),
@@ -28,6 +38,7 @@ def start_session(db: Session, user: User) -> ChatSession:
 
 
 def end_session(db: Session, user: User, session_id: str | None = None) -> None:
+    """Mark session(s) inactive on logout — context is no longer used."""
     q = db.query(ChatSession).filter(ChatSession.user_id == user.id, ChatSession.is_active.is_(True))
     if session_id:
         q = q.filter(ChatSession.id == session_id)
@@ -36,6 +47,7 @@ def end_session(db: Session, user: User, session_id: str | None = None) -> None:
 
 
 def get_session(db: Session, user: User, session_id: str) -> ChatSession:
+    """Fetch session by ID — 404 if not found or belongs to another user."""
     session = (
         db.query(ChatSession)
         .filter(ChatSession.id == session_id, ChatSession.user_id == user.id)
@@ -47,6 +59,7 @@ def get_session(db: Session, user: User, session_id: str) -> ChatSession:
 
 
 def get_active_session(db: Session, user: User) -> ChatSession | None:
+    """Return the user's current active session, if any."""
     return (
         db.query(ChatSession)
         .filter(ChatSession.user_id == user.id, ChatSession.is_active.is_(True))
@@ -56,10 +69,12 @@ def get_active_session(db: Session, user: User) -> ChatSession | None:
 
 
 def get_session_context(session: ChatSession) -> dict:
+    """Parse context_json string into a Python dict."""
     return parse_context(session.context_json)
 
 
 def save_session_context(db: Session, session: ChatSession, ctx: dict) -> None:
+    """Write updated context dict back to SQLite."""
     session.context_json = serialize_context(ctx)
     db.commit()
 
@@ -67,12 +82,20 @@ def save_session_context(db: Session, session: ChatSession, ctx: dict) -> None:
 def apply_exchange_to_session(
     db: Session, session: ChatSession, query: str, answer: str
 ) -> dict:
+    """
+    After each chat exchange: update context (last_vehicle, last_topic) and save.
+    Called at the end of app.py /chat handler.
+    """
     ctx = update_context(get_session_context(session), query, answer)
     save_session_context(db, session, ctx)
     return ctx
 
 
 def get_session_messages(db: Session, session_id: str) -> list[dict]:
+    """
+    Rebuild chat UI messages from chat_logs for the current session.
+    Used when user refreshes the page while still logged in.
+    """
     rows = (
         db.query(ChatLog)
         .filter(ChatLog.session_id == session_id)

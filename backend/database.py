@@ -1,10 +1,17 @@
-"""SQLite database setup and session management."""
+"""
+SQLite database setup and session management.
+
+SQLite stores all relational data in backend/app.db (single file, no separate server).
+SQLAlchemy engine + SessionLocal provide database connections.
+get_db() is a FastAPI dependency — yields a session per request, auto-closes after.
+"""
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from config import DATABASE_URL
 
+# check_same_thread=False required for SQLite with FastAPI multi-threaded requests
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False},
@@ -13,11 +20,15 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 class Base(DeclarativeBase):
+    """Base class for all ORM models in models.py."""
     pass
 
 
 def get_db():
-    """Yield a database session for FastAPI dependency injection."""
+    """
+    FastAPI dependency: yields a DB session for one request.
+    Usage in routes: db: Session = Depends(get_db)
+    """
     db = SessionLocal()
     try:
         yield db
@@ -26,7 +37,7 @@ def get_db():
 
 
 def _migrate_schema() -> None:
-    """Add new columns/tables on existing SQLite databases."""
+    """Lightweight migrations for existing databases (add columns if missing)."""
     insp = inspect(engine)
     if insp.has_table("chat_logs"):
         cols = {c["name"] for c in insp.get_columns("chat_logs")}
@@ -38,7 +49,7 @@ def _migrate_schema() -> None:
 
 
 def init_db() -> None:
-    """Create all tables if they do not exist."""
+    """Create all tables from models.py if they do not exist. Called on server startup."""
     from models import Booking, ChatLog, ChatSession, OtpRecord, User  # noqa: F401
 
     Base.metadata.create_all(bind=engine)

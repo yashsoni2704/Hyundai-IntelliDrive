@@ -1,4 +1,15 @@
-"""Session context: track vehicle/topic and resolve vague follow-up queries."""
+"""
+Session context: track vehicle/topic and resolve vague follow-up queries.
+
+This module is the "brain" for understanding what the user means:
+  - normalize_message: fix typos (milage → mileage, tucsan → tucson)
+  - detect_vehicle / detect_topic: parse intent from text
+  - resolve_query: expand "its mileage" → "What is the mileage of Hyundai Creta?"
+  - needs_clarification: ask for car model when context is missing
+  - update_context: remember last car/topic after each exchange
+
+Context is stored as JSON in chat_sessions.context_json (see session_service.py).
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,11 @@
-"""Persist and query chat interaction logs for admin monitoring."""
+"""
+Persist and query chat interaction logs for admin monitoring and sidebar history.
+
+Functions:
+  - log_chat_interaction: save every Q&A to chat_logs table
+  - get_user_recent_exchanges: last 5 Q&As for sidebar (user-wide, all sessions)
+  - get_chat_logs: paginated logs for admin dashboard (newest first, IST timestamps)
+"""
 
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -12,6 +19,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 def _to_ist_iso(dt: datetime | None) -> str:
+    """Convert UTC datetime to IST display string for admin UI."""
     if not dt:
         return ""
     if dt.tzinfo is None:
@@ -29,6 +37,7 @@ def log_chat_interaction(
     user: User | None = None,
     session_id: str | None = None,
 ) -> ChatLog:
+    """Insert one chat exchange row — called from app.py after every /chat response."""
     record = ChatLog(
         user_id=user.id if user else None,
         session_id=session_id,
@@ -51,7 +60,10 @@ def get_user_recent_exchanges(
     limit: int = 5,
     session_id: str | None = None,
 ) -> list[dict]:
-    """Last N Q&A pairs for sidebar (latest first). Optionally scoped to one session."""
+    """
+    Last N Q&A pairs for sidebar (latest first).
+    By default returns user-wide history across all logins (session_id=None).
+    """
     q = db.query(ChatLog).filter(ChatLog.user_id == user_id)
     if session_id:
         q = q.filter(ChatLog.session_id == session_id)
@@ -76,6 +88,10 @@ def get_chat_logs(
     per_page: int = 10,
     email: str | None = None,
 ) -> dict:
+    """
+    Paginated chat logs for admin monitor.
+    Page 1 = newest entries. Optional email filter (partial match).
+    """
     q = db.query(ChatLog)
     if email:
         q = q.filter(ChatLog.user_email.ilike(f"%{email.strip().lower()}%"))
@@ -83,7 +99,7 @@ def get_chat_logs(
     total = q.with_entities(func.count(ChatLog.id)).scalar() or 0
     page = max(1, page)
     per_page = min(max(1, per_page), 50)
-    offset = (page - 1) * per_page
+    offset = (page - 1) * per_page  # SQL OFFSET for pagination
 
     rows = (
         q.order_by(ChatLog.created_at.desc())

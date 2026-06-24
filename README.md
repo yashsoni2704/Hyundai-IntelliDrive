@@ -1,14 +1,16 @@
 # Hyundai Knowledge Assistant
 
-A production-ready retrieval-based chatbot that answers Hyundai showroom FAQs using semantic search. There is **no LLM, no generation** — every answer comes directly from the Excel knowledge base.
+A full-stack retrieval-based chatbot for Hyundai showroom FAQs, test drive booking, auth with email OTP, and admin monitoring. There is **no LLM generation** — every answer comes from the Excel knowledge base via semantic search.
+
+**Full documentation:** `Hyundai_Knowledge_Assistant_Project_Documentation.docx` (generate with `python generate_documentation.py`)
 
 ## How it works
 
 ```
-User Question → Sentence-Transformer Embedding → ChromaDB Similarity Search → Stored FAQ Answer
+User Question → Context resolution → BGE-M3 Embedding → ChromaDB Search → Stored FAQ Answer
 ```
 
-If no FAQ matches above the confidence threshold, the system returns **"Sorry, no data found."**
+Each FAQ row = one indexed unit (atomic Q&A chunk). Questions are embedded; answers stored in metadata.
 
 ---
 
@@ -17,10 +19,12 @@ If no FAQ matches above the confidence threshold, the system returns **"Sorry, n
 | Layer      | Technology                              |
 |------------|-----------------------------------------|
 | Frontend   | React 18, Vite 6, plain CSS             |
-| Backend    | FastAPI, Uvicorn                        |
-| Vector DB  | ChromaDB (persistent, local)            |
-| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` |
-| Data       | Pandas + openpyxl (reads `.xlsx`)       |
+| Backend    | FastAPI, Uvicorn, SQLAlchemy            |
+| Database   | SQLite (users, bookings, sessions, logs)|
+| Vector DB  | ChromaDB (persistent, cosine HNSW)      |
+| Embeddings | `BAAI/bge-m3` via sentence-transformers |
+| Data       | Pandas + openpyxl (165 FAQ pairs)       |
+| Email      | Gmail SMTP (OTP)                        |
 
 ---
 
@@ -72,7 +76,7 @@ cd backend
 pip install -r requirements.txt
 ```
 
-First startup downloads `all-MiniLM-L6-v2` (~90 MB) from HuggingFace and ingests the Excel file into ChromaDB. Subsequent startups are instant.
+First startup downloads `BAAI/bge-m3` (~2GB) from HuggingFace and ingests FAQs into ChromaDB. Subsequent startups are fast if Excel unchanged.
 
 ### 2. Frontend
 
@@ -141,7 +145,7 @@ Copy `backend/.env.example` to `backend/.env` and adjust:
 |-----------------------|----------------------------|----------------------------------------------|
 | `EXCEL_PATH`          | `../data/hyundai_faq.xlsx` | Path to the FAQ Excel file                   |
 | `CHROMA_PERSIST_DIR`  | `./chroma_db`              | Where ChromaDB stores its data               |
-| `EMBEDDING_MODEL`     | `all-MiniLM-L6-v2`         | HuggingFace sentence-transformer model name  |
+| `EMBEDDING_MODEL`     | `BAAI/bge-m3`              | HuggingFace embedding model name             |
 | `SIMILARITY_THRESHOLD`| `0.55`                     | Minimum cosine similarity to return an answer |
 | `CORS_ORIGINS`        | `http://localhost:5173`    | Comma-separated allowed frontend origins     |
 
@@ -153,10 +157,9 @@ Replace or edit `data/hyundai_faq.xlsx`. On next backend restart, ChromaDB detec
 
 ## Features
 
-- ChatGPT-style dark UI with collapsible sidebar
-- Persistent chat history (localStorage)
-- Welcome screen with clickable suggestion prompts
-- Animated typing indicator during search
-- Knowledge base stats panel (FAQ count, model, status)
-- Semantic search — understands paraphrases without keyword matching
-- Zero LLM, zero external API calls, zero data leaving your machine
+- Semantic FAQ search with topic + vehicle re-ranking
+- Session context (follow-ups like "its mileage" after asking about Creta)
+- Clarification prompts when car model is unknown
+- User auth with email OTP, test drive booking, admin dashboard
+- Sidebar: last 5 Q&A history; chat logs with IST timestamps for admin
+- Code comments in all core files — see documentation Section 15 for reading order

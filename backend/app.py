@@ -1,4 +1,14 @@
-"""FastAPI application for Hyundai Knowledge Assistant."""
+"""
+FastAPI application entry point for Hyundai Knowledge Assistant.
+
+This file wires together:
+  - Startup: SQLite init + ChromaDB FAQ ingestion (lifespan)
+  - POST /chat: main chatbot pipeline (clarification → context → search → log)
+  - GET /health, GET /stats: monitoring endpoints
+  - Routers: auth, bookings, admin, session
+
+Read this file after context_service.py and chroma_db.py to see the full request flow.
+"""
 
 import logging
 from contextlib import asynccontextmanager
@@ -20,7 +30,6 @@ from routers.bookings_router import router as bookings_router
 from routers.admin_router import router as admin_router
 from context_service import (
     clarification_message,
-    detect_vehicle,
     enrich_search_query,
     needs_clarification,
     normalize_message,
@@ -46,7 +55,10 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database and ChromaDB on startup."""
+    """
+    Runs once when the server starts (before accepting requests).
+    init_db() creates SQLite tables; vector_store.initialize() ingests FAQs into ChromaDB.
+    """
     logger.info("Starting Hyundai Knowledge Assistant backend...")
     init_db()
     try:
@@ -55,17 +67,19 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("Failed to initialize knowledge base: %s", exc)
         raise
-    yield
+    yield  # Server runs here until shutdown
     logger.info("Shutting down backend.")
 
 
+# FastAPI app instance — title/description appear in auto-generated docs at /docs
 app = FastAPI(
     title="Hyundai Knowledge Assistant",
     description="Semantic FAQ retrieval, auth, and test drive bookings.",
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
 )
 
+# CORS: allow browser frontend (port 5173) to call this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in CORS_ORIGINS],
@@ -74,11 +88,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount route modules — each router defines its own prefix (/auth, /bookings, etc.)
 app.include_router(auth_router)
 app.include_router(bookings_router)
 app.include_router(admin_router)
 app.include_router(session_router)
 
+
+# --- Pydantic models: define JSON request/response shapes (auto-validated by FastAPI) ---
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User question")
@@ -105,11 +122,11 @@ class AvailableSlotItem(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     found: bool
-    response_type: str = "faq"
+    response_type: str = "faq"  # faq | slots | clarification
     suggestions: list[SuggestionItem] = []
     available_slots: list[AvailableSlotItem] = []
-    resolved_query: str | None = None
-    context: dict | None = None
+    resolved_query: str | None = None  # expanded query after context resolution
+    context: dict | None = None  # updated session context returned to frontend
 
 
 class StatsResponse(BaseModel):
@@ -123,10 +140,10 @@ class StatsResponse(BaseModel):
 
 @app.get("/health")
 async def health_check():
-    """Check backend health and knowledge base readiness."""
+    """Lightweight health check for monitoring."""
     return {
         "status": "ok",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "knowledge_base": "ready" if vector_store.is_initialized else "initializing",
         "auth": True,
         "bookings": True,
@@ -135,6 +152,7 @@ async def health_check():
 
 @app.get("/stats", response_model=StatsResponse)
 async def get_stats():
+    """FAQ count, ChromaDB status — shown in Knowledge Panel on frontend."""
     try:
         return vector_store.get_stats()
     except Exception as exc:
@@ -145,13 +163,20 @@ async def get_stats():
 @app.post("/chat", response_model=ChatResponse)
 async def chat(
     request: ChatRequest,
-    db: Session = Depends(get_db),
-    current_user: User | None = Depends(get_optional_user),
+    db: Session = Depends(get_db),  # Injected DB session — closed automatically after request
+    current_user: User | None = Depends(get_optional_user),  # None if guest (no JWT)
 ):
-    """Retrieve FAQ answer or return available booking slots from the database."""
+    """
+    Main chat endpoint. Pipeline:
+      1. Normalize typos
+      2. Load session context (if logged in)
+      3. Clarification check (vague query without car model)
+      4. Resolve query with context (e.g. 'its mileage' → 'Creta mileage')
+      5. Slot intent OR semantic FAQ search
+      6. Log interaction + update session context
+    """
     try:
         if not vector_store.is_initialized:
-            logger.warning("Chat requested but knowledge base is still initializing...")
             raise HTTPException(
                 status_code=503,
                 detail="Knowledge base is initializing. Please try again in a moment.",
@@ -163,19 +188,19 @@ async def chat(
         session_id = request.session_id
         message = original
 
+        # Load persisted context (last_vehicle, pending_topic, etc.) from SQLite
         if current_user and session_id:
             session = get_session(db, current_user, session_id)
             session_ctx = get_session_context(session)
 
+        # Step A: Ask user for car model when query is too vague (e.g. 'its price' on fresh login)
         if needs_clarification(original, session_ctx):
             answer = clarification_message(original, session_ctx)
             suggestions = get_follow_up_suggestions(
                 original, answer, False, used_ids, session_ctx
             )
             if current_user and session_id:
-                session_ctx = prepare_clarification_context(
-                    dict(session_ctx), original
-                )
+                session_ctx = prepare_clarification_context(dict(session_ctx), original)
                 save_session_context(db, session, session_ctx)
             response = ChatResponse(
                 answer=answer,
@@ -195,12 +220,13 @@ async def chat(
             )
             return response
 
+        # Step B: Expand vague follow-ups using session context
         if current_user and session_id:
             message = resolve_query(original, session_ctx)
         else:
             message = enrich_search_query(original, session_ctx)
 
-        # Slot intent only on what the user actually typed (not context-expanded text)
+        # Step C: Booking slot queries — check ORIGINAL text only (avoid false positives)
         if is_slot_availability_query(original):
             slots_data = get_next_available_slots(db)
             suggestions = get_follow_up_suggestions(
@@ -230,14 +256,14 @@ async def chat(
             )
             if current_user and session_id:
                 session = get_session(db, current_user, session_id)
-                session_ctx = apply_exchange_to_session(
-                    db, session, original, answer
-                )
+                session_ctx = apply_exchange_to_session(db, session, original, answer)
                 response.context = session_ctx
             return response
 
+        # Step D: Semantic FAQ search in ChromaDB
         result = vector_store.search(message)
         if not result["found"]:
+            # Retry with alternate enriched query if first search missed
             alt = enrich_search_query(original, session_ctx)
             if alt != message:
                 result = vector_store.search(alt)
@@ -264,6 +290,7 @@ async def chat(
             user=current_user,
             session_id=session_id,
         )
+        # Persist updated context (last_vehicle, last_topic) for next message
         if current_user and session_id:
             session = get_session(db, current_user, session_id)
             session_ctx = apply_exchange_to_session(

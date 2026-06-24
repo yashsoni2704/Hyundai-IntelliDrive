@@ -1,3 +1,16 @@
+/**
+ * HTTP client for all backend API calls.
+ *
+ * API_BASE = '/api' in dev — Vite proxy forwards to http://127.0.0.1:8000 (see vite.config.js).
+ * JWT token stored in localStorage; sent as Authorization: Bearer header when logged in.
+ *
+ * Main functions:
+ *   sendChatMessage — POST /chat (FAQ search + context)
+ *   startChatSession / endChatSession — session lifecycle
+ *   fetchRecentExchanges — sidebar last 5 Q&As
+ *   fetchAdminChatLogs — admin paginated monitor
+ */
+
 // Use Vite proxy (/api → backend) in dev to avoid CORS and port issues
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
