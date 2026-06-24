@@ -4,10 +4,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-echo "=== Building React frontend ==="
-cd "$ROOT/frontend"
-npm ci
-VITE_API_URL= npm run build
+# echo "=== Building React frontend ==="
+# cd "$ROOT/frontend"
+# npm ci
+# VITE_API_URL= npm run build
 
 echo "=== Installing Python dependencies ==="
 pip install -r "$ROOT/requirements.txt"
