@@ -39,21 +39,33 @@ from embeddings import embed_texts, embed_query
 logger = logging.getLogger(__name__)
 
 NO_DATA_MESSAGE = "Sorry, no data found."
+OUT_OF_SCOPE_MESSAGE = (
+    "This assistant only answers questions about Hyundai vehicles from our FAQ knowledge base. "
+    "Sorry, no data found."
+)
 SEARCH_STOPWORDS = {
     "a",
     "an",
+    "about",
     "are",
     "can",
     "car",
     "cars",
     "does",
+    "give",
     "hyundai",
     "i",
     "in",
     "is",
+    "know",
+    "me",
     "of",
+    "please",
+    "show",
+    "tell",
     "the",
     "to",
+    "want",
     "what",
     "when",
     "which",
@@ -63,6 +75,34 @@ SEARCH_STOPWORDS = {
     "this",
     "that",
     "with",
+}
+# Other car brands — not in our Hyundai FAQ
+COMPETITOR_BRANDS = {
+    "tata",
+    "toyota",
+    "maruti",
+    "suzuki",
+    "mahindra",
+    "honda",
+    "kia",
+    "ford",
+    "volkswagen",
+    "vw",
+    "bmw",
+    "mercedes",
+    "benz",
+    "audi",
+    "renault",
+    "nissan",
+    "skoda",
+    "mg",
+    "jeep",
+    "citroen",
+    "fiat",
+    "chevrolet",
+    "datsun",
+    "isuzu",
+    "force",
 }
 
 TOPIC_SIGNALS: dict[str, list[str]] = {
@@ -103,6 +143,37 @@ class FAQVectorStore:
         self._initializing = False
         self._init_error: str | None = None
         self._semantic_search_available = not LIGHTWEIGHT_MODE
+
+    def _query_terms(self, text: str) -> set[str]:
+        return {
+            term
+            for term in re.findall(r"[a-z0-9]+", text.lower())
+            if term not in SEARCH_STOPWORDS
+        }
+
+    def _distinctive_terms(self, text: str) -> set[str]:
+        """Meaningful tokens — exclude generic phrasing like 'tell me about'."""
+        return self._query_terms(text)
+
+    def _is_out_of_scope(self, query: str) -> bool:
+        """Reject competitor-brand queries with no Hyundai model in the question."""
+        normalized = normalize_message(query)
+        lower = normalized.lower()
+        tokens = set(re.findall(r"[a-z0-9]+", lower))
+        mentions_competitor = bool(tokens & COMPETITOR_BRANDS)
+        if not mentions_competitor:
+            return False
+        if "hyundai" in lower or detect_vehicle(normalized):
+            return False
+        return True
+
+    def _faq_matches_distinctive_terms(
+        self, distinctive: set[str], question: str, answer: str
+    ) -> bool:
+        if not distinctive:
+            return True
+        blob = f"{question} {answer}".lower()
+        return any(term in blob for term in distinctive)
 
     @property
     def document_count(self) -> int:
@@ -287,6 +358,9 @@ class FAQVectorStore:
         if not query:
             return {"answer": NO_DATA_MESSAGE, "found": False}
 
+        if self._is_out_of_scope(query):
+            return {"answer": OUT_OF_SCOPE_MESSAGE, "found": False}
+
         if LIGHTWEIGHT_MODE or not self._semantic_search_available:
             return self._lexical_search(query)
 
@@ -330,11 +404,8 @@ class FAQVectorStore:
         records = self._collection.get(include=["documents", "metadatas"])
         documents = records.get("documents") or []
         metadatas = records.get("metadatas") or []
-        query_terms = {
-            term
-            for term in re.findall(r"[a-z0-9]+", query.lower())
-            if term not in SEARCH_STOPWORDS
-        }
+        query_terms = self._query_terms(query)
+        distinctive_terms = self._distinctive_terms(query)
 
         best_score = 0.0
         best_metadata = None
@@ -345,6 +416,9 @@ class FAQVectorStore:
             question = (metadata or {}).get("question") or document or ""
             answer = (metadata or {}).get("answer") or ""
             question_lower = question.lower()
+
+            if not self._faq_matches_distinctive_terms(distinctive_terms, question, answer):
+                continue
 
             if query_topic and not self._topic_matches(query_topic, question, answer):
                 continue
@@ -363,7 +437,7 @@ class FAQVectorStore:
             if not question_terms:
                 continue
 
-            overlap = len(query_terms & question_terms) / max(len(query_terms), 1)
+            overlap = len(query_terms & question_terms) / max(len(distinctive_terms), 1)
             phrase_bonus = 0.25 if query.lower() in question_lower or question_lower in query.lower() else 0.0
             similarity = SequenceMatcher(None, query.lower(), question_lower).ratio()
             score = (overlap * 0.65) + (similarity * 0.35) + phrase_bonus
@@ -372,7 +446,7 @@ class FAQVectorStore:
                 best_score = score
                 best_metadata = metadata
 
-        if best_score < 0.22 or not best_metadata:
+        if best_score < 0.35 or not best_metadata:
             return {
                 "answer": NO_DATA_MESSAGE,
                 "found": False,
