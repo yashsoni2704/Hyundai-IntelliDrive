@@ -104,6 +104,71 @@ COMPETITOR_BRANDS = {
     "isuzu",
     "force",
 }
+# Well-known non-Hyundai model names (no Hyundai vehicle detected in query)
+COMPETITOR_MODELS = {
+    "harrier",
+    "safari",
+    "nexon",
+    "punch",
+    "altroz",
+    "tiago",
+    "tigor",
+    "fortuner",
+    "innova",
+    "glanza",
+    "baleno",
+    "swift",
+    "dzire",
+    "ertiga",
+    "brezza",
+    "fronx",
+    "jimny",
+    "scorpio",
+    "xuv700",
+    "xuv300",
+    "thar",
+    "bolero",
+    "seltos",
+    "sonet",
+    "carens",
+    "carnival",
+    "seltos",
+    "hector",
+    "astor",
+    "comet",
+    "punch",
+    "wagonr",
+    "celerio",
+    "ignis",
+}
+# Topic words — matching only these is not enough to pick an FAQ
+TOPIC_QUERY_TERMS = {
+    "price",
+    "cost",
+    "lakh",
+    "rupee",
+    "mileage",
+    "milage",
+    "kmpl",
+    "fuel",
+    "seat",
+    "seater",
+    "seating",
+    "compare",
+    "comparison",
+    "versus",
+    "feature",
+    "features",
+    "spec",
+    "specs",
+    "book",
+    "booking",
+    "warranty",
+    "service",
+    "schedule",
+    "test",
+    "drive",
+}
 
 TOPIC_SIGNALS: dict[str, list[str]] = {
     "price": ["price", "cost", "lakh", "rupee", "starting"],
@@ -155,25 +220,31 @@ class FAQVectorStore:
         """Meaningful tokens — exclude generic phrasing like 'tell me about'."""
         return self._query_terms(text)
 
+    def _entity_terms(self, query: str) -> set[str]:
+        """Car/model tokens in the query — exclude generic topic words like 'price'."""
+        terms = self._query_terms(query)
+        return {term for term in terms if term not in TOPIC_QUERY_TERMS}
+
     def _is_out_of_scope(self, query: str) -> bool:
-        """Reject competitor-brand queries with no Hyundai model in the question."""
+        """Reject competitor or unknown non-Hyundai queries."""
         normalized = normalize_message(query)
         lower = normalized.lower()
         tokens = set(re.findall(r"[a-z0-9]+", lower))
-        mentions_competitor = bool(tokens & COMPETITOR_BRANDS)
-        if not mentions_competitor:
-            return False
         if "hyundai" in lower or detect_vehicle(normalized):
             return False
-        return True
+        if tokens & COMPETITOR_BRANDS:
+            return True
+        if tokens & COMPETITOR_MODELS:
+            return True
+        return False
 
     def _faq_matches_distinctive_terms(
-        self, distinctive: set[str], question: str, answer: str
+        self, entity_terms: set[str], question: str, answer: str
     ) -> bool:
-        if not distinctive:
+        if not entity_terms:
             return True
         blob = f"{question} {answer}".lower()
-        return any(term in blob for term in distinctive)
+        return all(term in blob for term in entity_terms)
 
     @property
     def document_count(self) -> int:
@@ -405,7 +476,7 @@ class FAQVectorStore:
         documents = records.get("documents") or []
         metadatas = records.get("metadatas") or []
         query_terms = self._query_terms(query)
-        distinctive_terms = self._distinctive_terms(query)
+        entity_terms = self._entity_terms(query)
 
         best_score = 0.0
         best_metadata = None
@@ -417,7 +488,7 @@ class FAQVectorStore:
             answer = (metadata or {}).get("answer") or ""
             question_lower = question.lower()
 
-            if not self._faq_matches_distinctive_terms(distinctive_terms, question, answer):
+            if not self._faq_matches_distinctive_terms(entity_terms, question, answer):
                 continue
 
             if query_topic and not self._topic_matches(query_topic, question, answer):
@@ -437,7 +508,7 @@ class FAQVectorStore:
             if not question_terms:
                 continue
 
-            overlap = len(query_terms & question_terms) / max(len(distinctive_terms), 1)
+            overlap = len(query_terms & question_terms) / max(len(entity_terms) or len(query_terms), 1)
             phrase_bonus = 0.25 if query.lower() in question_lower or question_lower in query.lower() else 0.0
             similarity = SequenceMatcher(None, query.lower(), question_lower).ratio()
             score = (overlap * 0.65) + (similarity * 0.35) + phrase_bonus
