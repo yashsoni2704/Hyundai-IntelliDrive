@@ -12,6 +12,7 @@ Read this file after context_service.py and chroma_db.py to see the full request
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -57,25 +58,27 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Startup for cloud hosts (Render/Railway):
-      1. init_db() — fast
-      2. yield immediately so uvicorn binds to $PORT (deploy health check passes)
-      3. load embeddings + ChromaDB in a background thread (can take several minutes)
+    Do NOT block before yield — Render detects an open port only after startup.
+    All heavy work (SQLite + ChromaDB + embeddings) runs in a background task.
     """
-    logger.info("Starting Hyundai Knowledge Assistant backend...")
-    init_db()
+    logger.info("Lifespan start — PORT=%s", os.getenv("PORT", "not set"))
 
-    async def _init_kb() -> None:
-        logger.info("Background knowledge-base initialization started...")
-        await asyncio.to_thread(vector_store.initialize_safe)
-        if vector_store.is_initialized:
-            logger.info("Knowledge base ready.")
-        elif vector_store.init_error:
-            logger.error("Knowledge base failed: %s", vector_store.init_error)
+    async def _background_boot() -> None:
+        try:
+            logger.info("Background boot: initializing database...")
+            await asyncio.to_thread(init_db)
+            logger.info("Background boot: initializing knowledge base...")
+            await asyncio.to_thread(vector_store.initialize_safe)
+            if vector_store.is_initialized:
+                logger.info("Knowledge base ready.")
+            elif vector_store.init_error:
+                logger.error("Knowledge base failed: %s", vector_store.init_error)
+        except Exception:
+            logger.exception("Background boot failed")
 
-    kb_task = asyncio.create_task(_init_kb())
-    yield
-    kb_task.cancel()
+    boot_task = asyncio.create_task(_background_boot())
+    yield  # uvicorn binds to PORT here — Render deploy succeeds
+    boot_task.cancel()
     logger.info("Shutting down backend.")
 
 
@@ -86,6 +89,7 @@ app = FastAPI(
     version="2.2.0",
     lifespan=lifespan,
 )
+logger.info("FastAPI app created — uvicorn will bind to PORT next")
 
 # CORS: allow browser frontend (port 5173) to call this API
 app.add_middleware(
@@ -327,3 +331,17 @@ async def chat(
     except Exception as exc:
         logger.exception("Chat search failed")
         raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", "10000"))
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )

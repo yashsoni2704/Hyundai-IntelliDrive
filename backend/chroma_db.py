@@ -13,9 +13,11 @@ import logging
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+from typing import TYPE_CHECKING
 
-import chromadb
-from chromadb.config import Settings
+if TYPE_CHECKING:
+    import chromadb
+    from chromadb.api.models.Collection import Collection
 
 from config import (
     CHROMA_PERSIST_DIR,
@@ -84,13 +86,14 @@ class FAQVectorStore:
     """
 
     def __init__(self) -> None:
+        import chromadb
+        from chromadb.config import Settings
+
         CHROMA_PERSIST_DIR.mkdir(parents=True, exist_ok=True)
-        # PersistentClient saves vectors to disk (survives server restarts)
         self._client = chromadb.PersistentClient(
             path=str(CHROMA_PERSIST_DIR),
             settings=Settings(anonymized_telemetry=False),
         )
-        # cosine space: lower distance = more similar meaning
         self._collection = self._client.get_or_create_collection(
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
@@ -377,5 +380,23 @@ class FAQVectorStore:
         }
 
 
-# Singleton — imported by app.py as `vector_store`
-vector_store = FAQVectorStore()
+_store: FAQVectorStore | None = None
+
+
+def get_vector_store() -> FAQVectorStore:
+    """Lazy singleton — avoids heavy Chroma init during uvicorn import."""
+    global _store
+    if _store is None:
+        _store = FAQVectorStore()
+    return _store
+
+
+class _VectorStoreProxy:
+    """Defer FAQVectorStore() until first attribute access (after port bind)."""
+
+    def __getattr__(self, name: str):
+        return getattr(get_vector_store(), name)
+
+
+# Imported by app.py — proxy only, no heavy work at import time
+vector_store = _VectorStoreProxy()

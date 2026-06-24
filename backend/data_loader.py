@@ -1,32 +1,26 @@
 """
 Load FAQ data from Excel and manage ingestion change detection.
 
-Chunking strategy: each Excel row = one atomic FAQ unit (Question + Answer).
-We do NOT split long text into smaller chunks — FAQs are already short Q&A pairs.
-
-needs_reingestion() compares Excel hash/count against saved metadata so we only
-re-embed when the knowledge base actually changed (saves startup time).
+Pandas is imported only inside functions so the web server can start quickly
+on Render before heavy data libraries load.
 """
 
 import hashlib
 import json
 from pathlib import Path
 
-import pandas as pd
-
 from config import EMBEDDING_MODEL, EXCEL_PATH, INGESTION_META_PATH
 
 
 def load_faqs_from_excel(excel_path: Path | None = None) -> list[dict[str, str]]:
-    """
-    Read Question/Answer pairs from hyundai_faq.xlsx.
-    Returns list of dicts: [{"question": "...", "answer": "..."}, ...]
-    """
+    """Read Question/Answer pairs from hyundai_faq.xlsx."""
+    import pandas as pd
+
     path = excel_path or EXCEL_PATH
     if not path.exists():
         raise FileNotFoundError(f"FAQ Excel file not found: {path}")
 
-    df = pd.read_excel(path)  # Pandas uses openpyxl engine for .xlsx files
+    df = pd.read_excel(path)
 
     if "Question" not in df.columns or "Answer" not in df.columns:
         raise ValueError("Excel must contain 'Question' and 'Answer' columns")
@@ -35,7 +29,6 @@ def load_faqs_from_excel(excel_path: Path | None = None) -> list[dict[str, str]]
     for _, row in df.iterrows():
         question = str(row["Question"]).strip()
         answer = str(row["Answer"]).strip()
-        # Skip blank rows and pandas NaN string representations
         if question and answer and question.lower() != "nan" and answer.lower() != "nan":
             faqs.append({"question": question, "answer": answer})
 
@@ -46,14 +39,13 @@ def load_faqs_from_excel(excel_path: Path | None = None) -> list[dict[str, str]]
 
 
 def compute_excel_hash(excel_path: Path | None = None) -> str:
-    """SHA-256 hash of raw Excel bytes — changes when any cell is edited."""
+    """SHA-256 hash of Excel bytes — detects file edits."""
     path = excel_path or EXCEL_PATH
     with open(path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
 
 
 def read_ingestion_meta() -> dict | None:
-    """Read ingestion_meta.json written after last successful ChromaDB ingest."""
     if not INGESTION_META_PATH.exists():
         return None
     with open(INGESTION_META_PATH, "r", encoding="utf-8") as f:
@@ -61,17 +53,12 @@ def read_ingestion_meta() -> dict | None:
 
 
 def write_ingestion_meta(meta: dict) -> None:
-    """Save metadata after ingestion so next startup can skip re-embedding."""
     INGESTION_META_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(INGESTION_META_PATH, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
 
 def needs_reingestion(chroma_count: int, excel_faq_count: int) -> bool:
-    """
-    Return True if ChromaDB vectors must be rebuilt.
-    Triggers: empty DB, Excel edited, FAQ count changed, or embedding model changed.
-    """
     if chroma_count == 0:
         return True
 

@@ -28,9 +28,15 @@ CHROMA_PERSIST_DIR = BASE_DIR / "chroma_db"
 INGESTION_META_PATH = CHROMA_PERSIST_DIR / "ingestion_meta.json"
 DATABASE_URL = f"sqlite:///{BASE_DIR / 'app.db'}"  # SQLite file-based database
 
-# Fail fast at import time if FAQ file is missing
+# Warn at import time instead of crashing — lets /health respond on Render
 if not EXCEL_PATH.exists():
-    raise FileNotFoundError(f"Excel file not found: {EXCEL_PATH}\nPlease ensure hyundai_faq.xlsx is in the data/ folder")
+    import warnings
+
+    warnings.warn(
+        f"FAQ Excel file not found: {EXCEL_PATH}. "
+        "Knowledge-base endpoints will fail until data/hyundai_faq.xlsx is present.",
+        stacklevel=1,
+    )
 
 # --- ChromaDB ---
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "hyundai_faq")

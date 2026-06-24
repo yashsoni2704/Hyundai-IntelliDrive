@@ -1,13 +1,13 @@
 services:
   - type: web
     name: hyundai-chatbot-backend
-    env: python
+    runtime: python
     plan: free
+    rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: bash start.sh
+    startCommand: python run.py
     healthCheckPath: /health
     envVars:
-      # Free tier has ~512MB RAM — BGE-M3 (~2GB) will OOM. Use MiniLM on free plan.
       - key: EMBEDDING_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
       - key: HF_HOME
