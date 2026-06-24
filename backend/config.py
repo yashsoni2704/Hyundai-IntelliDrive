@@ -64,6 +64,10 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").replace(" ", "")  # Gmail app pas
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL") or SMTP_USER
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"
 
+# Resend HTTP API (works reliably on Render; Gmail SMTP often times out from cloud IPs)
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "")
+
 # Comma-separated list of allowed frontend origins for CORS
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",

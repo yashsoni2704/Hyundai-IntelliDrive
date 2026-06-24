@@ -132,6 +132,15 @@ def default_context() -> dict[str, Any]:
     }
 
 
+def coerce_context(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Merge a client-supplied context dict with defaults (guest chat round-trip)."""
+    if not raw:
+        return default_context()
+    base = default_context()
+    base.update({k: v for k, v in raw.items() if k in base})
+    return base
+
+
 def parse_context(raw: str | None) -> dict[str, Any]:
     if not raw:
         return default_context()
@@ -466,14 +475,22 @@ def resolve_query(message: str, ctx: dict[str, Any]) -> str:
 def update_context(ctx: dict[str, Any], query: str, answer: str) -> dict[str, Any]:
     query = normalize_message(query)
     explicit_vehicle = detect_vehicle(query)
-    if explicit_vehicle:
+    compare_query = detect_topic(query) == "compare"
+    last_vehicle = ctx.get("last_vehicle") or ""
+
+    if compare_query and last_vehicle and explicit_vehicle and explicit_vehicle != last_vehicle:
+        # "compare it with Creta" — keep Venue as anchor, Creta is the partner.
+        vehicle = last_vehicle
+        ctx["pending_topic"] = ""
+        ctx["pending_vehicle"] = ""
+    elif explicit_vehicle:
         vehicle = explicit_vehicle
         ctx["pending_topic"] = ""
         ctx["pending_vehicle"] = ""
     elif is_vague_query(query):
-        vehicle = ctx.get("last_vehicle") or ""
+        vehicle = last_vehicle
     else:
-        vehicle = detect_vehicle(answer) or ctx.get("last_vehicle") or ""
+        vehicle = detect_vehicle(answer) or last_vehicle
 
     topic = detect_topic(query)
     if not topic and not is_vague_query(query):
@@ -483,7 +500,7 @@ def update_context(ctx: dict[str, Any], query: str, answer: str) -> dict[str, An
         ctx["last_vehicle"] = vehicle
     if topic:
         ctx["last_topic"] = topic
-        if explicit_vehicle:
+        if explicit_vehicle and not compare_query:
             ctx["pending_topic"] = ""
 
     recent = list(ctx.get("recent_queries") or [])

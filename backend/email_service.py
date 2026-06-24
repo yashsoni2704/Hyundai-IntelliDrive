@@ -1,12 +1,17 @@
-"""Send OTP emails via SMTP."""
+"""Send OTP emails via Resend HTTP API or SMTP."""
 
+import json
 import logging
 import smtplib
+import urllib.error
+import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from config import (
     DEBUG_MODE,
+    RESEND_API_KEY,
+    RESEND_FROM_EMAIL,
     SMTP_FROM_EMAIL,
     SMTP_HOST,
     SMTP_PASSWORD,
@@ -23,6 +28,14 @@ class EmailDeliveryError(Exception):
 
 def _smtp_configured() -> bool:
     return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD)
+
+
+def _resend_configured() -> bool:
+    return bool(RESEND_API_KEY and RESEND_FROM_EMAIL)
+
+
+def email_configured() -> bool:
+    return _resend_configured() or _smtp_configured()
 
 
 def _otp_digits_row(otp_code: str) -> str:
@@ -195,18 +208,54 @@ def _build_html_body(otp_code: str, purpose: str) -> str:
 
 def _send_via_smtp(message: MIMEMultipart, to_email: str) -> None:
     """Send email using STARTTLS (587) or SSL (465) based on SMTP_PORT."""
+    timeout = 12
     if SMTP_PORT == 465:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=timeout) as server:
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_FROM_EMAIL, to_email, message.as_string())
         return
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=timeout) as server:
         server.ehlo()
         server.starttls()
         server.ehlo()
         server.login(SMTP_USER, SMTP_PASSWORD)
         server.sendmail(SMTP_FROM_EMAIL, to_email, message.as_string())
+
+
+def _send_via_resend(
+    to_email: str, subject: str, plain_body: str, html_body: str
+) -> None:
+    """Send via Resend REST API (fast, no blocked SMTP ports on cloud hosts)."""
+    payload = json.dumps(
+        {
+            "from": RESEND_FROM_EMAIL,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body,
+            "text": plain_body,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            if response.status >= 400:
+                raise EmailDeliveryError("Resend rejected the email request")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        logger.error("Resend API error %s: %s", exc.code, body)
+        raise EmailDeliveryError("Could not send verification email. Please try again.") from exc
+    except urllib.error.URLError as exc:
+        logger.error("Resend API unreachable: %s", exc)
+        raise EmailDeliveryError("Could not send verification email. Please try again.") from exc
 
 
 def send_otp_email(to_email: str, otp_code: str, purpose: str) -> None:
@@ -220,28 +269,41 @@ def send_otp_email(to_email: str, otp_code: str, purpose: str) -> None:
         "password_reset": "Reset Your Hyundai Assistant Password",
     }
     subject = subject_map.get(purpose, "Your Hyundai Assistant Verification Code")
+    plain_body = _build_plain_body(otp_code, purpose)
+    html_body = _build_html_body(otp_code, purpose)
 
-    if not _smtp_configured():
+    if not email_configured():
         logger.warning(
-            "SMTP not configured — OTP for %s (%s): %s (server log only, not sent to client)",
+            "Email not configured — OTP for %s (%s): %s (server log only, not sent to client)",
             to_email,
             purpose,
             otp_code,
         )
         if DEBUG_MODE:
             return
-        raise EmailDeliveryError("SMTP is not configured")
+        raise EmailDeliveryError("Email is not configured on the server")
+
+    if _resend_configured():
+        try:
+            _send_via_resend(to_email, subject, plain_body, html_body)
+            logger.info("OTP email sent via Resend to %s (%s)", to_email, purpose)
+            return
+        except EmailDeliveryError:
+            raise
+        except Exception as exc:
+            logger.exception("Resend failed for %s", to_email)
+            raise EmailDeliveryError("Could not send verification email. Please try again.") from exc
 
     message = MIMEMultipart("alternative")
     message["From"] = f"Hyundai Knowledge Assistant <{SMTP_FROM_EMAIL}>"
     message["To"] = to_email
     message["Subject"] = subject
-    message.attach(MIMEText(_build_plain_body(otp_code, purpose), "plain", "utf-8"))
-    message.attach(MIMEText(_build_html_body(otp_code, purpose), "html", "utf-8"))
+    message.attach(MIMEText(plain_body, "plain", "utf-8"))
+    message.attach(MIMEText(html_body, "html", "utf-8"))
 
     try:
         _send_via_smtp(message, to_email)
-        logger.info("OTP email sent to %s (%s)", to_email, purpose)
+        logger.info("OTP email sent via SMTP to %s (%s)", to_email, purpose)
     except smtplib.SMTPAuthenticationError as exc:
         logger.error(
             "Gmail rejected SMTP login for %s — regenerate App Password at "

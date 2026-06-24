@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from auth_utils import get_optional_user
 from booking_service import get_next_available_slots
 from chat_log_service import log_chat_interaction
+from email_service import email_configured
 from chroma_db import vector_store
 from config import CORS_ORIGINS, FRONTEND_DIST
 from database import get_db, init_db
@@ -36,11 +37,13 @@ from routers.bookings_router import router as bookings_router
 from routers.admin_router import router as admin_router
 from context_service import (
     clarification_message,
+    coerce_context,
     enrich_search_query,
     needs_clarification,
     normalize_message,
     prepare_clarification_context,
     resolve_query,
+    update_context,
 )
 from routers.session_router import router as session_router
 from session_service import (
@@ -120,6 +123,10 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User question")
     used_suggestion_ids: list[str] = Field(default_factory=list)
     session_id: str | None = Field(default=None, description="Active chat session for context")
+    client_context: dict | None = Field(
+        default=None,
+        description="Guest chat context round-trip (last_vehicle, last_topic)",
+    )
 
 
 class SuggestionItem(BaseModel):
@@ -176,6 +183,7 @@ async def health_check():
         "knowledge_base_error": vector_store.init_error,
         "auth": True,
         "bookings": True,
+        "email_configured": email_configured(),
     }
 
 
@@ -213,14 +221,17 @@ async def chat(
 
         original = normalize_message(request.message.strip())
         used_ids = request.used_suggestion_ids
-        session_ctx: dict = {}
         session_id = request.session_id
         message = original
 
-        # Load persisted context (last_vehicle, pending_topic, etc.) from SQLite
+        # Load context: logged-in users from DB; guests from client_context round-trip
+        session_ctx: dict = {}
+        session = None
         if current_user and session_id:
             session = get_session(db, current_user, session_id)
             session_ctx = get_session_context(session)
+        else:
+            session_ctx = coerce_context(request.client_context)
 
         # Step A: Ask user for car model when query is too vague (e.g. 'its price' on fresh login)
         if needs_clarification(original, session_ctx):
@@ -228,15 +239,15 @@ async def chat(
             suggestions = get_follow_up_suggestions(
                 original, answer, False, used_ids, session_ctx
             )
-            if current_user and session_id:
-                session_ctx = prepare_clarification_context(dict(session_ctx), original)
+            session_ctx = prepare_clarification_context(dict(session_ctx), original)
+            if current_user and session_id and session:
                 save_session_context(db, session, session_ctx)
             response = ChatResponse(
                 answer=answer,
                 found=False,
                 response_type="clarification",
                 suggestions=suggestions,
-                context=session_ctx if current_user and session_id else None,
+                context=session_ctx,
             )
             log_chat_interaction(
                 db,
@@ -250,10 +261,7 @@ async def chat(
             return response
 
         # Step B: Expand vague follow-ups using session context
-        if current_user and session_id:
-            message = resolve_query(original, session_ctx)
-        else:
-            message = enrich_search_query(original, session_ctx)
+        message = resolve_query(original, session_ctx)
 
         # Step C: Booking slot queries — check ORIGINAL text only (avoid false positives)
         if is_slot_availability_query(original):
@@ -283,10 +291,11 @@ async def chat(
                 user=current_user,
                 session_id=session_id,
             )
-            if current_user and session_id:
-                session = get_session(db, current_user, session_id)
+            if current_user and session_id and session:
                 session_ctx = apply_exchange_to_session(db, session, original, answer)
-                response.context = session_ctx
+            else:
+                session_ctx = update_context(session_ctx, original, answer)
+            response.context = session_ctx
             return response
 
         # Step D: Semantic FAQ search in ChromaDB
@@ -320,12 +329,13 @@ async def chat(
             session_id=session_id,
         )
         # Persist updated context (last_vehicle, last_topic) for next message
-        if current_user and session_id:
-            session = get_session(db, current_user, session_id)
+        if current_user and session_id and session:
             session_ctx = apply_exchange_to_session(
                 db, session, original, result["answer"]
             )
-            response.context = session_ctx
+        else:
+            session_ctx = update_context(session_ctx, original, result["answer"])
+        response.context = session_ctx
         return response
     except HTTPException:
         raise
