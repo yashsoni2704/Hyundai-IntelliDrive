@@ -42,6 +42,14 @@ export default function ChatPage() {
   const { markUsed, getUsedIds } = useSuggestionTracker(userId)
 
   const [guestMessages, setGuestMessages] = useState([])
+  const [guestContext, setGuestContext] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('hyundai_guest_context')
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  })
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -129,6 +137,7 @@ export default function ChatPage() {
           message,
           getUsedIds(),
           isAuthenticated ? sessionId : null,
+          isAuthenticated ? null : guestContext,
         )
         addMessage('assistant', result.answer, {
           found: result.found,
@@ -136,6 +145,10 @@ export default function ChatPage() {
           available_slots: result.available_slots || [],
           suggestions: result.suggestions || [],
         })
+        if (!isAuthenticated && result.context) {
+          setGuestContext(result.context)
+          sessionStorage.setItem('hyundai_guest_context', JSON.stringify(result.context))
+        }
         if (isAuthenticated) {
           await refreshRecent()
         }
@@ -155,6 +168,7 @@ export default function ChatPage() {
       markUsed,
       isAuthenticated,
       sessionId,
+      guestContext,
       refreshRecent,
     ],
   )

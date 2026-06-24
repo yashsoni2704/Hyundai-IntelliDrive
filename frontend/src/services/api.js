@@ -11,8 +11,11 @@
  *   fetchAdminChatLogs — admin paginated monitor
  */
 
-// Dev: Vite proxy /api → backend. Production (Render): VITE_API_URL="" → same-origin /chat, /auth, etc.
-const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
+// Local dev: /api → Vite proxy → localhost:8000 (vite.config.js).
+// Production (Vercel): /api → vercel.json rewrite → Render backend (no CORS issues).
+const API_BASE = import.meta.env.DEV
+  ? (import.meta.env.VITE_API_URL ?? '/api')
+  : '/api'
 
 function getToken() {
   return localStorage.getItem('hyundai_auth_token')
@@ -91,13 +94,19 @@ async function request(path, options = {}) {
   return data
 }
 
-export async function sendChatMessage(message, usedSuggestionIds = [], sessionId = null) {
+export async function sendChatMessage(
+  message,
+  usedSuggestionIds = [],
+  sessionId = null,
+  clientContext = null,
+) {
   return request('/chat', {
     method: 'POST',
     body: JSON.stringify({
       message,
       used_suggestion_ids: usedSuggestionIds,
       session_id: sessionId,
+      client_context: clientContext,
     }),
   })
 }
