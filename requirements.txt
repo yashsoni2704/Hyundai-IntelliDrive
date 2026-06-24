@@ -1,0 +1,3 @@
+# Render installs Python dependencies from this root file.
+# Keep the actual dependency list in backend/requirements.txt.
+-r backend/requirements.txt
