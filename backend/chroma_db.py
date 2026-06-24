@@ -33,16 +33,21 @@ from data_loader import (
     write_ingestion_meta,
     compute_excel_hash,
 )
-from context_service import VEHICLE_MODELS, detect_topic, detect_vehicle, normalize_message
+from context_service import (
+    NOT_OUR_CAR_MESSAGE,
+    TOPIC_QUERY_TERMS,
+    VEHICLE_MODELS,
+    detect_topic,
+    detect_vehicle,
+    mentions_unknown_vehicle,
+    normalize_message,
+    query_entity_terms,
+)
 from embeddings import embed_texts, embed_query
 
 logger = logging.getLogger(__name__)
 
 NO_DATA_MESSAGE = "Sorry, no data found."
-OUT_OF_SCOPE_MESSAGE = (
-    "This assistant only answers questions about Hyundai vehicles from our FAQ knowledge base. "
-    "Sorry, no data found."
-)
 SEARCH_STOPWORDS = {
     "a",
     "an",
@@ -76,100 +81,6 @@ SEARCH_STOPWORDS = {
     "that",
     "with",
 }
-# Other car brands — not in our Hyundai FAQ
-COMPETITOR_BRANDS = {
-    "tata",
-    "toyota",
-    "maruti",
-    "suzuki",
-    "mahindra",
-    "honda",
-    "kia",
-    "ford",
-    "volkswagen",
-    "vw",
-    "bmw",
-    "mercedes",
-    "benz",
-    "audi",
-    "renault",
-    "nissan",
-    "skoda",
-    "mg",
-    "jeep",
-    "citroen",
-    "fiat",
-    "chevrolet",
-    "datsun",
-    "isuzu",
-    "force",
-}
-# Well-known non-Hyundai model names (no Hyundai vehicle detected in query)
-COMPETITOR_MODELS = {
-    "harrier",
-    "safari",
-    "nexon",
-    "punch",
-    "altroz",
-    "tiago",
-    "tigor",
-    "fortuner",
-    "innova",
-    "glanza",
-    "baleno",
-    "swift",
-    "dzire",
-    "ertiga",
-    "brezza",
-    "fronx",
-    "jimny",
-    "scorpio",
-    "xuv700",
-    "xuv300",
-    "thar",
-    "bolero",
-    "seltos",
-    "sonet",
-    "carens",
-    "carnival",
-    "seltos",
-    "hector",
-    "astor",
-    "comet",
-    "punch",
-    "wagonr",
-    "celerio",
-    "ignis",
-}
-# Topic words — matching only these is not enough to pick an FAQ
-TOPIC_QUERY_TERMS = {
-    "price",
-    "cost",
-    "lakh",
-    "rupee",
-    "mileage",
-    "milage",
-    "kmpl",
-    "fuel",
-    "seat",
-    "seater",
-    "seating",
-    "compare",
-    "comparison",
-    "versus",
-    "feature",
-    "features",
-    "spec",
-    "specs",
-    "book",
-    "booking",
-    "warranty",
-    "service",
-    "schedule",
-    "test",
-    "drive",
-}
-
 TOPIC_SIGNALS: dict[str, list[str]] = {
     "price": ["price", "cost", "lakh", "rupee", "starting"],
     "mileage": ["mileage", "kmpl", "km/l", "fuel efficiency", "fuel"],
@@ -216,27 +127,12 @@ class FAQVectorStore:
             if term not in SEARCH_STOPWORDS
         }
 
-    def _distinctive_terms(self, text: str) -> set[str]:
-        """Meaningful tokens — exclude generic phrasing like 'tell me about'."""
-        return self._query_terms(text)
-
     def _entity_terms(self, query: str) -> set[str]:
-        """Car/model tokens in the query — exclude generic topic words like 'price'."""
-        terms = self._query_terms(query)
-        return {term for term in terms if term not in TOPIC_QUERY_TERMS}
+        return query_entity_terms(query)
 
     def _is_out_of_scope(self, query: str) -> bool:
-        """Reject competitor or unknown non-Hyundai queries."""
-        normalized = normalize_message(query)
-        lower = normalized.lower()
-        tokens = set(re.findall(r"[a-z0-9]+", lower))
-        if "hyundai" in lower or detect_vehicle(normalized):
-            return False
-        if tokens & COMPETITOR_BRANDS:
-            return True
-        if tokens & COMPETITOR_MODELS:
-            return True
-        return False
+        """Reject queries that name a car outside our Hyundai FAQ model list."""
+        return mentions_unknown_vehicle(query)
 
     def _faq_matches_distinctive_terms(
         self, entity_terms: set[str], question: str, answer: str
@@ -430,7 +326,7 @@ class FAQVectorStore:
             return {"answer": NO_DATA_MESSAGE, "found": False}
 
         if self._is_out_of_scope(query):
-            return {"answer": OUT_OF_SCOPE_MESSAGE, "found": False}
+            return {"answer": NOT_OUR_CAR_MESSAGE, "found": False}
 
         if LIGHTWEIGHT_MODE or not self._semantic_search_available:
             return self._lexical_search(query)

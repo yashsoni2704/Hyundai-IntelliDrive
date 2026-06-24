@@ -42,6 +42,169 @@ VEHICLE_ALIASES: dict[str, str] = {
     "i-20": "i20",
 }
 
+NOT_OUR_CAR_MESSAGE = (
+    "Sorry, that is not a Hyundai model in our knowledge base. "
+    "Please ask about Hyundai cars such as Creta, Venue, Verna, or Tucson."
+)
+
+TOPIC_QUERY_TERMS = {
+    "price",
+    "cost",
+    "lakh",
+    "rupee",
+    "mileage",
+    "milage",
+    "kmpl",
+    "fuel",
+    "seat",
+    "seater",
+    "seating",
+    "compare",
+    "comparison",
+    "versus",
+    "feature",
+    "features",
+    "spec",
+    "specs",
+    "book",
+    "booking",
+    "warranty",
+    "service",
+    "schedule",
+    "test",
+    "drive",
+}
+
+GENERIC_AUTO_TERMS = {
+    "suv",
+    "sedan",
+    "hatchback",
+    "vehicle",
+    "vehicles",
+    "ev",
+    "electric",
+    "petrol",
+    "diesel",
+    "variant",
+    "variants",
+    "model",
+    "models",
+    "new",
+    "latest",
+    "best",
+    "family",
+    "highway",
+    "city",
+    "compact",
+    "premium",
+    "luxury",
+    "affordable",
+    "vs",
+    "and",
+    "or",
+    "my",
+    "your",
+}
+
+QUERY_STOPWORDS = {
+    "a",
+    "an",
+    "about",
+    "are",
+    "can",
+    "car",
+    "cars",
+    "does",
+    "give",
+    "hyundai",
+    "i",
+    "in",
+    "is",
+    "know",
+    "me",
+    "of",
+    "please",
+    "show",
+    "tell",
+    "the",
+    "to",
+    "want",
+    "what",
+    "when",
+    "which",
+    "how",
+    "many",
+    "much",
+    "this",
+    "that",
+    "with",
+    "it",
+    "its",
+}
+
+
+def build_known_hyundai_terms() -> frozenset[str]:
+    """Lowercase tokens for every Hyundai model in our FAQ database."""
+    terms: set[str] = set()
+    for model in VEHICLE_MODELS:
+        terms.add(model.lower())
+        for part in model.split():
+            terms.add(part)
+    for alias, canonical in VEHICLE_ALIASES.items():
+        terms.add(alias.lower())
+        terms.add(canonical.lower())
+        for part in alias.split():
+            terms.add(part)
+    return frozenset(terms)
+
+
+_KNOWN_HYUNDAI_TERMS: frozenset[str] | None = None
+
+
+def get_known_hyundai_terms() -> frozenset[str]:
+    global _KNOWN_HYUNDAI_TERMS
+    if _KNOWN_HYUNDAI_TERMS is None:
+        _KNOWN_HYUNDAI_TERMS = build_known_hyundai_terms()
+    return _KNOWN_HYUNDAI_TERMS
+
+
+def is_our_hyundai_model(term: str) -> bool:
+    """True when a token matches a Hyundai model in our database."""
+    token = term.lower()
+    known = get_known_hyundai_terms()
+    if token in known:
+        return True
+    for model_token in known:
+        if len(token) >= 3 and (token in model_token or model_token in token):
+            return True
+    return False
+
+
+def query_entity_terms(query: str) -> set[str]:
+    """Model-like tokens in a query (excludes topics and generic car words)."""
+    normalized = normalize_message(query)
+    tokens = {
+        term
+        for term in re.findall(r"[a-z0-9]+", normalized.lower())
+        if term not in QUERY_STOPWORDS
+    }
+    return {
+        term
+        for term in tokens
+        if term not in TOPIC_QUERY_TERMS and term not in GENERIC_AUTO_TERMS
+    }
+
+
+def mentions_unknown_vehicle(query: str) -> bool:
+    """
+    True when the user names a car that is not in our Hyundai model list.
+    Generic questions (e.g. 'what is the price') return False — clarification handles those.
+    """
+    entity_terms = query_entity_terms(query)
+    if not entity_terms:
+        return False
+    return any(not is_our_hyundai_model(term) for term in entity_terms)
+
 SPELLING_FIXES: dict[str, str] = {
     "alcazr": "alcazar",
     "alacazar": "alcazar",
