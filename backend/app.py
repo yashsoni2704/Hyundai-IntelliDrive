@@ -301,8 +301,7 @@ async def chat(
         # Step D: Semantic FAQ search in ChromaDB
         result = vector_store.search(message)
         if not result["found"]:
-            # Retry with alternate enriched query if first search missed
-            alt = enrich_search_query(original, session_ctx)
+            alt = resolve_query(original, session_ctx)
             if alt != message:
                 result = vector_store.search(alt)
                 if result["found"]:

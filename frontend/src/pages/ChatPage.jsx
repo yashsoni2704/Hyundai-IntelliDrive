@@ -9,7 +9,7 @@
  * Flow: user types → handleSend → sendChatMessage API → display answer + suggestions
  * Guests use local guestMessages; logged-in users use server session + DB logs.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import Header from '../components/Header'
 import ChatArea from '../components/ChatArea'
@@ -22,6 +22,21 @@ import { useAuth } from '../contexts/AuthContext'
 import { useSessionChat } from '../hooks/useSessionChat'
 import { useSuggestionTracker } from '../hooks/useSuggestionTracker'
 import { sendChatMessage, fetchStats, createBooking } from '../services/api'
+
+const GUEST_CONTEXT_KEY = 'hyundai_guest_context'
+
+function loadGuestContext() {
+  try {
+    const raw = sessionStorage.getItem(GUEST_CONTEXT_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function saveGuestContext(ctx) {
+  sessionStorage.setItem(GUEST_CONTEXT_KEY, JSON.stringify(ctx))
+}
 
 export default function ChatPage() {
   const { user, isAuthenticated, logout } = useAuth()
@@ -42,14 +57,8 @@ export default function ChatPage() {
   const { markUsed, getUsedIds } = useSuggestionTracker(userId)
 
   const [guestMessages, setGuestMessages] = useState([])
-  const [guestContext, setGuestContext] = useState(() => {
-    try {
-      const raw = sessionStorage.getItem('hyundai_guest_context')
-      return raw ? JSON.parse(raw) : null
-    } catch {
-      return null
-    }
-  })
+  const guestContextRef = useRef(loadGuestContext())
+  const [guestContext, setGuestContext] = useState(() => guestContextRef.current)
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -133,11 +142,15 @@ export default function ChatPage() {
       setIsLoading(true)
 
       try {
+        const contextToSend = isAuthenticated
+          ? null
+          : (guestContextRef.current ?? loadGuestContext())
+
         const result = await sendChatMessage(
           message,
           getUsedIds(),
           isAuthenticated ? sessionId : null,
-          isAuthenticated ? null : guestContext,
+          contextToSend,
         )
         addMessage('assistant', result.answer, {
           found: result.found,
@@ -146,8 +159,9 @@ export default function ChatPage() {
           suggestions: result.suggestions || [],
         })
         if (!isAuthenticated && result.context) {
+          guestContextRef.current = result.context
           setGuestContext(result.context)
-          sessionStorage.setItem('hyundai_guest_context', JSON.stringify(result.context))
+          saveGuestContext(result.context)
         }
         if (isAuthenticated) {
           await refreshRecent()
@@ -168,7 +182,6 @@ export default function ChatPage() {
       markUsed,
       isAuthenticated,
       sessionId,
-      guestContext,
       refreshRecent,
     ],
   )

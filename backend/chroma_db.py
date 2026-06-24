@@ -351,6 +351,10 @@ class FAQVectorStore:
             if not self._vehicle_matches(query_vehicles, question, answer, query_topic):
                 continue
 
+            if query_topic == "compare" and len(query_vehicles) == 1:
+                if "compare" not in question_lower:
+                    continue
+
             question_terms = {
                 term
                 for term in re.findall(r"[a-z0-9]+", question_lower)
