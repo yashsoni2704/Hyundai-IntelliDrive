@@ -15,8 +15,12 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -24,7 +28,7 @@ from auth_utils import get_optional_user
 from booking_service import get_next_available_slots
 from chat_log_service import log_chat_interaction
 from chroma_db import vector_store
-from config import CORS_ORIGINS
+from config import CORS_ORIGINS, FRONTEND_DIST
 from database import get_db, init_db
 from models import User
 from routers.auth_router import router as auth_router
@@ -148,12 +152,6 @@ class StatsResponse(BaseModel):
     chroma_status: str
     similarity_threshold: float
     excel_path: str
-
-
-@app.get("/")
-async def root():
-    """Render and uptime monitors can hit / or /health."""
-    return await health_check()
 
 
 @app.get("/health")
@@ -331,6 +329,43 @@ async def chat(
     except Exception as exc:
         logger.exception("Chat search failed")
         raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+
+def _frontend_index() -> Path:
+    return FRONTEND_DIST / "index.html"
+
+
+def _frontend_available() -> bool:
+    return _frontend_index().is_file()
+
+
+if _frontend_available():
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
+    logger.info("Serving React frontend from %s", FRONTEND_DIST)
+
+
+@app.get("/", include_in_schema=False)
+async def serve_root():
+    """Serve chat UI when built; otherwise return health JSON for API-only deploys."""
+    if _frontend_available():
+        return FileResponse(_frontend_index())
+    return await health_check()
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str):
+    """SPA fallback — static files from Vite build, else index.html."""
+    if not _frontend_available():
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if full_path:
+        candidate = FRONTEND_DIST / full_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+
+    return FileResponse(_frontend_index())
 
 
 if __name__ == "__main__":

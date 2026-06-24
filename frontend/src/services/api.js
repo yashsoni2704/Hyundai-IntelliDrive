@@ -11,8 +11,8 @@
  *   fetchAdminChatLogs — admin paginated monitor
  */
 
-// Use Vite proxy (/api → backend) in dev to avoid CORS and port issues
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
+// Dev: Vite proxy /api → backend. Production (Render): VITE_API_URL="" → same-origin /chat, /auth, etc.
+const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 function getToken() {
   return localStorage.getItem('hyundai_auth_token')

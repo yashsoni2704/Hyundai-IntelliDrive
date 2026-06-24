@@ -3,13 +3,14 @@ services:
     name: hyundai-chatbot-backend
     runtime: python
     plan: free
-    rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: python run.py
+    buildCommand: bash build_render.sh
+    startCommand: python run_render.py
     healthCheckPath: /health
     envVars:
       - key: EMBEDDING_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
+      - key: CORS_ORIGINS
+        value: https://hyundai-intellidrive.onrender.com
       - key: HF_HOME
         value: /tmp/huggingface
       - key: TRANSFORMERS_CACHE

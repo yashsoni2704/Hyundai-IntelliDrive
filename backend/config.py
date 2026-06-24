@@ -23,6 +23,7 @@ load_dotenv(BASE_DIR / ".env")  # load_dotenv reads KEY=value pairs into os.envi
 
 # --- File paths ---
 DATA_DIR = PROJECT_ROOT / "data"
+FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 EXCEL_PATH = DATA_DIR / "hyundai_faq.xlsx"
 CHROMA_PERSIST_DIR = BASE_DIR / "chroma_db"
 INGESTION_META_PATH = CHROMA_PERSIST_DIR / "ingestion_meta.json"
