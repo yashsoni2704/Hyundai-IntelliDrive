@@ -10,7 +10,7 @@ services:
       - key: EMBEDDING_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
       - key: CORS_ORIGINS
-        value: https://hyundai-intellidrive.onrender.com
+        value: https://hyundai-intellidrive.onrender.com,https://hyundai-intelli-drive-frontend.vercel.app
       - key: HF_HOME
         value: /tmp/huggingface
       - key: TRANSFORMERS_CACHE
