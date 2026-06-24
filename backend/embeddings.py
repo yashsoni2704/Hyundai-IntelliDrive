@@ -9,7 +9,7 @@ import logging
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from config import EMBEDDING_MODEL
+from config import EMBEDDING_MODEL, LIGHTWEIGHT_MODE
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 @lru_cache(maxsize=1)
 def get_embedding_model() -> "SentenceTransformer":
     """Load and cache the embedding model (first call downloads weights)."""
+    if LIGHTWEIGHT_MODE:
+        raise RuntimeError(
+            "Embedding model disabled in LIGHTWEIGHT_MODE (use keyword search on Render free tier)."
+        )
     from sentence_transformers import SentenceTransformer
 
     logger.info("Loading embedding model: %s (first run may take a few minutes)...", EMBEDDING_MODEL)

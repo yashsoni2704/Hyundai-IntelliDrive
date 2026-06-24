@@ -24,6 +24,7 @@ from config import (
     COLLECTION_NAME,
     EMBEDDING_MODEL,
     EXCEL_PATH,
+    LIGHTWEIGHT_MODE,
     SIMILARITY_THRESHOLD,
 )
 from data_loader import (
@@ -101,7 +102,7 @@ class FAQVectorStore:
         self._initialized = False
         self._initializing = False
         self._init_error: str | None = None
-        self._semantic_search_available = True
+        self._semantic_search_available = not LIGHTWEIGHT_MODE
 
     @property
     def document_count(self) -> int:
@@ -166,20 +167,32 @@ class FAQVectorStore:
                 metadata={"hnsw:space": "cosine"},
             )
 
-        logger.info("Generating embeddings for %d FAQs (this may take a moment)...", len(faqs))
         questions = [faq["question"] for faq in faqs]
         answers = [faq["answer"] for faq in faqs]
         ids = [f"faq_{i}" for i in range(len(faqs))]
-        embeddings = embed_texts(questions)
-        logger.info("✓ Embeddings generated")
+        metadatas = [{"question": q, "answer": a} for q, a in zip(questions, answers)]
 
-        logger.info("Adding documents to ChromaDB...")
-        self._collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            documents=questions,
-            metadatas=[{"question": q, "answer": a} for q, a in zip(questions, answers)],
-        )
+        if LIGHTWEIGHT_MODE:
+            logger.info("LIGHTWEIGHT_MODE: storing FAQs without embedding model (keyword search)")
+            # Placeholder vectors — lexical search uses documents/metadatas only.
+            embeddings = [[0.0] for _ in questions]
+            self._collection.add(
+                ids=ids,
+                embeddings=embeddings,
+                documents=questions,
+                metadatas=metadatas,
+            )
+        else:
+            logger.info("Generating embeddings for %d FAQs (this may take a moment)...", len(faqs))
+            embeddings = embed_texts(questions)
+            logger.info("✓ Embeddings generated")
+            logger.info("Adding documents to ChromaDB...")
+            self._collection.add(
+                ids=ids,
+                embeddings=embeddings,
+                documents=questions,
+                metadatas=metadatas,
+            )
 
         write_ingestion_meta(
             {
@@ -273,6 +286,9 @@ class FAQVectorStore:
         query = normalize_message(query.strip())
         if not query:
             return {"answer": NO_DATA_MESSAGE, "found": False}
+
+        if LIGHTWEIGHT_MODE or not self._semantic_search_available:
+            return self._lexical_search(query)
 
         if self.document_count == 0:
             return {"answer": NO_DATA_MESSAGE, "found": False}
@@ -373,10 +389,11 @@ class FAQVectorStore:
         return {
             "total_faqs_loaded": len(faqs),
             "chroma_document_count": self.document_count,
-            "embedding_model": EMBEDDING_MODEL,
+            "embedding_model": "keyword-only" if LIGHTWEIGHT_MODE else EMBEDDING_MODEL,
             "chroma_status": "initialized" if self.is_initialized else "initializing",
             "similarity_threshold": SIMILARITY_THRESHOLD,
             "excel_path": str(EXCEL_PATH),
+            "search_mode": "keyword" if LIGHTWEIGHT_MODE else "semantic",
         }
 
 

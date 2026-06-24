@@ -72,6 +72,8 @@ async def lifespan(app: FastAPI):
             logger.info("Background boot: initializing database...")
             await asyncio.to_thread(init_db)
             logger.info("Background boot: initializing knowledge base...")
+            if os.getenv("LIGHTWEIGHT_MODE", "false").lower() == "true":
+                logger.info("LIGHTWEIGHT_MODE enabled — keyword search only (no PyTorch)")
             await asyncio.to_thread(vector_store.initialize_safe)
             if vector_store.is_initialized:
                 logger.info("Knowledge base ready.")

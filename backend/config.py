@@ -45,6 +45,9 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "hyundai_faq")
 # --- Embeddings (Hugging Face model name) ---
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
+# Render free tier (512 MB): skip PyTorch/sentence-transformers; use keyword FAQ search.
+LIGHTWEIGHT_MODE = os.getenv("LIGHTWEIGHT_MODE", "false").lower() == "true"
+
 # Chroma cosine distance = 1 - cosine_similarity; threshold 0.55 ≈ reasonably confident match
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.55"))
 
