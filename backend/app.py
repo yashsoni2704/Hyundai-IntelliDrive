@@ -36,9 +36,13 @@ from routers.auth_router import router as auth_router
 from routers.bookings_router import router as bookings_router
 from routers.admin_router import router as admin_router
 from context_service import (
+    NOT_OUR_CAR_MESSAGE,
     clarification_message,
     coerce_context,
+    default_context,
     enrich_search_query,
+    is_low_signal_query,
+    mentions_unknown_vehicle,
     needs_clarification,
     normalize_message,
     prepare_clarification_context,
@@ -232,6 +236,52 @@ async def chat(
             session_ctx = get_session_context(session)
         else:
             session_ctx = coerce_context(request.client_context)
+
+        # Reject non-Hyundai cars BEFORE context expansion (prevents "tata" -> Creta bug)
+        if mentions_unknown_vehicle(original):
+            answer = NOT_OUR_CAR_MESSAGE
+            response = ChatResponse(
+                answer=answer,
+                found=False,
+                response_type="faq",
+                suggestions=get_follow_up_suggestions(
+                    original, answer, False, used_ids, session_ctx
+                ),
+                context=session_ctx,
+            )
+            log_chat_interaction(
+                db,
+                query=original,
+                answer=answer,
+                found=False,
+                response_type="faq",
+                user=current_user,
+                session_id=session_id,
+            )
+            return response
+
+        # Ignore stale context for meaningless input (e.g. "a", "no data found")
+        if is_low_signal_query(original):
+            answer = clarification_message(original, default_context())
+            response = ChatResponse(
+                answer=answer,
+                found=False,
+                response_type="clarification",
+                suggestions=get_follow_up_suggestions(
+                    original, answer, False, used_ids, {}
+                ),
+                context=session_ctx,
+            )
+            log_chat_interaction(
+                db,
+                query=original,
+                answer=answer,
+                found=False,
+                response_type="clarification",
+                user=current_user,
+                session_id=session_id,
+            )
+            return response
 
         # Step A: Ask user for car model when query is too vague (e.g. 'its price' on fresh login)
         if needs_clarification(original, session_ctx):

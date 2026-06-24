@@ -205,6 +205,39 @@ def mentions_unknown_vehicle(query: str) -> bool:
         return False
     return any(not is_our_hyundai_model(term) for term in entity_terms)
 
+
+def is_low_signal_query(query: str) -> bool:
+    """Gibberish, single-letter, or meta text — must not reuse session context."""
+    stripped = normalize_message(query).strip().lower()
+    if len(stripped) < 2:
+        return True
+    if stripped in {
+        "a",
+        "no",
+        "ok",
+        "yes",
+        "hi",
+        "hello",
+        "test",
+        "why",
+        "hmm",
+        "help",
+    }:
+        return True
+    if re.fullmatch(r"(no\s+)?data(\s+not)?\s+found", stripped):
+        return True
+    entity_terms = query_entity_terms(query)
+    if entity_terms:
+        return False
+    if detect_vehicle(query) or detect_topic(query):
+        return False
+    words = [
+        w
+        for w in re.findall(r"[a-z0-9]+", stripped)
+        if w not in QUERY_STOPWORDS and w not in TOPIC_QUERY_TERMS
+    ]
+    return len(words) <= 2
+
 SPELLING_FIXES: dict[str, str] = {
     "alcazr": "alcazar",
     "alacazar": "alcazar",
@@ -580,6 +613,8 @@ def enrich_search_query(message: str, ctx: dict[str, Any]) -> str:
 def resolve_query(message: str, ctx: dict[str, Any]) -> str:
     """Expand vague queries using session context (e.g. 'its mileage' -> Creta mileage)."""
     message = normalize_message(message)
+    if mentions_unknown_vehicle(message) or is_low_signal_query(message):
+        return message
     lower = message.lower()
     vehicle = _vehicle_name(ctx, message)
     current_topic = detect_topic(message)
