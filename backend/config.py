@@ -64,7 +64,7 @@ DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"
 # Comma-separated list of allowed frontend origins for CORS
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173,"
-    "http://localhost:5174,http://127.0.0.1:5174,"
-    "http://localhost:5175,http://127.0.0.1:5175",
+    "http://localhost:5173,http://127.0.0.1:5173,https://hyundai-intelli-drive-frontend.vercel.app"
+    # "http://localhost:5174,http://127.0.0.1:5174,"
+    # "http://localhost:5175,http://127.0.0.1:5175"
 ).split(",")
