@@ -96,6 +96,8 @@ class FAQVectorStore:
             metadata={"hnsw:space": "cosine"},
         )
         self._initialized = False
+        self._initializing = False
+        self._init_error: str | None = None
         self._semantic_search_available = True
 
     @property
@@ -105,6 +107,31 @@ class FAQVectorStore:
     @property
     def is_initialized(self) -> bool:
         return self._initialized
+
+    @property
+    def is_initializing(self) -> bool:
+        return self._initializing
+
+    @property
+    def init_error(self) -> str | None:
+        return self._init_error
+
+    def initialize_safe(self) -> None:
+        """
+        Initialize KB without crashing the web server (for cloud deploys).
+        On failure, sets init_error so /health can report the problem.
+        """
+        if self._initialized or self._initializing:
+            return
+        self._initializing = True
+        self._init_error = None
+        try:
+            self.initialize()
+        except Exception as exc:
+            self._init_error = str(exc)
+            logger.exception("Knowledge base initialization failed")
+        finally:
+            self._initializing = False
 
     def initialize(self) -> None:
         """

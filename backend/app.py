@@ -10,6 +10,7 @@ This file wires together:
 Read this file after context_service.py and chroma_db.py to see the full request flow.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -56,18 +57,25 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Runs once when the server starts (before accepting requests).
-    init_db() creates SQLite tables; vector_store.initialize() ingests FAQs into ChromaDB.
+    Startup for cloud hosts (Render/Railway):
+      1. init_db() — fast
+      2. yield immediately so uvicorn binds to $PORT (deploy health check passes)
+      3. load embeddings + ChromaDB in a background thread (can take several minutes)
     """
     logger.info("Starting Hyundai Knowledge Assistant backend...")
     init_db()
-    try:
-        vector_store.initialize()
-        logger.info("Knowledge base ready.")
-    except Exception as exc:
-        logger.error("Failed to initialize knowledge base: %s", exc)
-        raise
-    yield  # Server runs here until shutdown
+
+    async def _init_kb() -> None:
+        logger.info("Background knowledge-base initialization started...")
+        await asyncio.to_thread(vector_store.initialize_safe)
+        if vector_store.is_initialized:
+            logger.info("Knowledge base ready.")
+        elif vector_store.init_error:
+            logger.error("Knowledge base failed: %s", vector_store.init_error)
+
+    kb_task = asyncio.create_task(_init_kb())
+    yield
+    kb_task.cancel()
     logger.info("Shutting down backend.")
 
 
@@ -138,13 +146,29 @@ class StatsResponse(BaseModel):
     excel_path: str
 
 
+@app.get("/")
+async def root():
+    """Render and uptime monitors can hit / or /health."""
+    return await health_check()
+
+
 @app.get("/health")
 async def health_check():
-    """Lightweight health check for monitoring."""
+    """Lightweight health check — responds immediately while KB loads in background."""
+    if vector_store.init_error:
+        kb_status = "error"
+    elif vector_store.is_initialized:
+        kb_status = "ready"
+    elif vector_store.is_initializing:
+        kb_status = "initializing"
+    else:
+        kb_status = "pending"
+
     return {
         "status": "ok",
         "version": "2.2.0",
-        "knowledge_base": "ready" if vector_store.is_initialized else "initializing",
+        "knowledge_base": kb_status,
+        "knowledge_base_error": vector_store.init_error,
         "auth": True,
         "bookings": True,
     }

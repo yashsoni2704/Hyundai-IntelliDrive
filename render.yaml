@@ -4,4 +4,17 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    startCommand: bash start.sh
+    healthCheckPath: /health
+    envVars:
+      # Free tier has ~512MB RAM — BGE-M3 (~2GB) will OOM. Use MiniLM on free plan.
+      - key: EMBEDDING_MODEL
+        value: sentence-transformers/all-MiniLM-L6-v2
+      - key: HF_HOME
+        value: /tmp/huggingface
+      - key: TRANSFORMERS_CACHE
+        value: /tmp/huggingface
+      - key: SENTENCE_TRANSFORMERS_HOME
+        value: /tmp/sentence_transformers
+      - key: DEBUG_MODE
+        value: "false"
