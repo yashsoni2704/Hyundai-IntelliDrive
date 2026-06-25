@@ -29,7 +29,7 @@ from booking_service import get_next_available_slots
 from chat_log_service import log_chat_interaction
 from email_service import email_configured, email_provider
 from chroma_db import vector_store
-from config import CORS_ORIGINS, FRONTEND_DIST, BREVO_API_KEY, ON_RENDER, SMTP_FROM_EMAIL
+from config import CORS_ORIGINS, FRONTEND_DIST, BREVO_API_KEY, ON_RENDER, SMTP_FROM_EMAIL, brevo_key_hint
 from database import get_db, init_db
 from models import User
 from routers.auth_router import router as auth_router
@@ -209,6 +209,7 @@ async def health_check():
         "email_configured": email_configured(),
         "email_provider": email_provider(),
         "email_ready": email_configured() and (not ON_RENDER or BREVO_API_KEY.startswith("xkeysib-")),
+        "brevo_key_hint": brevo_key_hint(),
     }
 
 

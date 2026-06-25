@@ -65,9 +65,14 @@ _smtp_password = (
     os.getenv("SMTP_PASSWORD", "").replace(" ", "")
     or os.getenv("SMTP_KEY", "").replace(" ", "")
 )
-_brevo_raw = (
-    os.getenv("BREVO_API_KEY", "").strip()
-    or os.getenv("BREVO_API", "").strip()
+def _clean_key(value: str) -> str:
+    return value.strip().strip('"').strip("'").strip()
+
+
+_brevo_raw = _clean_key(
+    os.getenv("BREVO_API_KEY", "")
+    or os.getenv("BREVO_API", "")
+    or os.getenv("BREVO_KEY", "")
 )
 
 # xsmtpsib- = SMTP key (local only). xkeysib- = API key (required on Render free).
@@ -81,6 +86,18 @@ else:
     BREVO_API_KEY = _brevo_raw
 
 SMTP_PASSWORD = _smtp_password
+
+
+def brevo_key_hint() -> str:
+    """Safe diagnostic for /health — never exposes the full key."""
+    raw = _clean_key(os.getenv("BREVO_API_KEY", "") or os.getenv("BREVO_API", "") or os.getenv("BREVO_KEY", ""))
+    if not raw:
+        return "BREVO_API_KEY is empty — add your xkeysib- key on Render"
+    if raw.startswith("xkeysib-"):
+        return "ok"
+    if raw.startswith("xsmtpsib-"):
+        return "wrong key type — BREVO_API_KEY has xsmtpsib (SMTP). Use xkeysib API key instead"
+    return f"unexpected key prefix ({raw[:10]}...) — must start with xkeysib-"
 # Must be a verified sender in Brevo (Senders & IP → Senders)
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip()
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"
