@@ -165,7 +165,7 @@ def _build_html_body(otp_code: str, purpose: str) -> str:
                 Verification code
               </p>
               <p style="margin:0 0 10px;font-size:12px;line-height:1.5;color:#6B7785;">
-                Select the code below and copy it into the app (or use the Copy button on the OTP screen).
+                Select the code below and copy it into the app.
               </p>
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">
                 {digits_row}
