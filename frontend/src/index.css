@@ -381,15 +381,21 @@ p, li { margin: 0; }
 }
 
 .message-block {
-  max-width: 85%;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .message-row--user .message-block {
   align-items: flex-end;
-  max-width: 85%;
+  width: max-content;
+  max-width: min(48rem, 80%);
+}
+
+.message-row--bot .message-block {
+  width: 100%;
+  max-width: min(48rem, 80%);
 }
 
 .message-bubble {
@@ -401,8 +407,8 @@ p, li { margin: 0; }
 }
 
 .message-bubble--user {
-  width: fit-content;
-  max-width: min(560px, 90%);
+  width: max-content;
+  max-width: 100%;
   background: #2F2F2F;
   border: 1px solid #424242;
   border-bottom-right-radius: 4px;
@@ -411,14 +417,14 @@ p, li { margin: 0; }
 
 .message-bubble--user p {
   margin: 0;
-}
-
-.message-bubble--user p.message-text--compact {
-  white-space: nowrap;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .message-bubble--bot {
-  max-width: min(560px, 90%);
+  width: 100%;
+  max-width: 100%;
   background: #303030;
   border: 1px solid #424242;
   border-bottom-left-radius: 4px;
@@ -1106,16 +1112,13 @@ p, li { margin: 0; }
   .mobile-menu-btn {
     display: flex;
   }
-    width: 100%;
-    top: auto;
-    bottom: 0;
-    height: 60%;
-    border-left: none;
-    border-top: 1px solid #424242;
+
+  .message-row--user .message-block {
+    max-width: 92%;
   }
 
-  .message-bubble {
-    max-width: 88%;
+  .message-row--bot .message-block {
+    max-width: 92%;
   }
 
   .header-actions {

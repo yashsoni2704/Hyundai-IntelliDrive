@@ -240,6 +240,7 @@ async def chat(
         # Reject non-Hyundai cars BEFORE context expansion (prevents "tata" -> Creta bug)
         if mentions_unknown_vehicle(original):
             answer = unknown_vehicle_message(original)
+            session_ctx = default_context()
             response = ChatResponse(
                 answer=answer,
                 found=False,
@@ -312,6 +313,29 @@ async def chat(
 
         # Step B: Expand vague follow-ups using session context
         message = resolve_query(original, session_ctx)
+
+        if mentions_unknown_vehicle(original) or mentions_unknown_vehicle(message):
+            answer = unknown_vehicle_message(original)
+            session_ctx = default_context()
+            response = ChatResponse(
+                answer=answer,
+                found=False,
+                response_type="faq",
+                suggestions=get_follow_up_suggestions(
+                    original, answer, False, used_ids, session_ctx
+                ),
+                context=session_ctx,
+            )
+            log_chat_interaction(
+                db,
+                query=original,
+                answer=answer,
+                found=False,
+                response_type="faq",
+                user=current_user,
+                session_id=session_id,
+            )
+            return response
 
         # Step C: Booking slot queries — check ORIGINAL text only (avoid false positives)
         if is_slot_availability_query(original):
