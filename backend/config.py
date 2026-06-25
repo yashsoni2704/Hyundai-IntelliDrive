@@ -8,7 +8,7 @@ Key settings:
   - EXCEL_PATH: source FAQ data
   - CHROMA_PERSIST_DIR: vector database storage on disk
   - SIMILARITY_THRESHOLD: minimum cosine similarity to return an answer (0.55)
-  - JWT_* / SMTP_*: authentication and email OTP
+  - JWT_* / SMTP_*: authentication and Brevo email OTP
 """
 
 import os
@@ -56,21 +56,17 @@ JWT_SECRET = os.getenv("JWT_SECRET", "hyundai-dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))  # 24 hours
 
-# --- Gmail SMTP for OTP emails ---
-SMTP_HOST = os.getenv("SMTP_HOST", "")
+# --- Brevo SMTP for OTP emails (https://app.brevo.com/settings/keys/smtp) ---
+SMTP_HOST = os.getenv("SMTP_HOST") or os.getenv("SMTP_SERVER", "")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").replace(" ", "")  # Gmail app passwords often have spaces
-SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL") or SMTP_USER
+SMTP_USER = os.getenv("SMTP_USER") or os.getenv("LOGIN", "")
+SMTP_PASSWORD = (
+    os.getenv("SMTP_PASSWORD", "").replace(" ", "")
+    or os.getenv("SMTP_KEY", "").replace(" ", "")
+)
+# Must be a verified sender in Brevo (Senders & IP → Senders)
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip()
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"
-
-# Resend API (recommended on Render — Gmail SMTP often times out from cloud IPs)
-RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
-# Default sender for Resend sandbox (onboarding@resend.dev only delivers to your Resend account email)
-RESEND_FROM_EMAIL = os.getenv(
-    "RESEND_FROM_EMAIL",
-    "Hyundai Knowledge Assistant <onboarding@resend.dev>" if RESEND_API_KEY else "",
-).strip()
 
 # Comma-separated list of allowed frontend origins for CORS
 CORS_ORIGINS = os.getenv(
