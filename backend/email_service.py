@@ -32,7 +32,6 @@ def _smtp_configured() -> bool:
 def _brevo_api_configured() -> bool:
     return bool(BREVO_API_KEY and SMTP_FROM_EMAIL)
 
-
 def email_configured() -> bool:
     return _brevo_api_configured() or _smtp_configured()
 

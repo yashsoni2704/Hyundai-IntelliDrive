@@ -64,36 +64,34 @@ SMTP_USER = os.getenv("SMTP_USER") or os.getenv("LOGIN", "")
 
 
 def _clean_key(value: str) -> str:
-    return value.strip().strip('"').strip("'").strip()
+    return value.strip().lstrip("\ufeff").strip('"').strip("'").strip()
 
 
 def _scan_env_keys() -> tuple[str, str]:
-    """Find Brevo API key (xkeysib) and SMTP key (xsmtpsib) from any common env var."""
+    """Find Brevo API key and SMTP key from env vars."""
     api_key = ""
     smtp_key = ""
-    for name, value in os.environ.items():
-        if not value:
-            continue
-        cleaned = _clean_key(value)
-        if cleaned.startswith("xkeysib-") and not api_key:
-            api_key = cleaned
-        elif cleaned.startswith("xsmtpsib-") and not smtp_key:
-            smtp_key = cleaned
 
-    # Explicit vars take priority (user may have both keys in correct fields)
-    for var in ("BREVO_API_KEY", "BREVO_API", "BREVO_KEY"):
-        cleaned = _clean_key(os.getenv(var, ""))
-        if cleaned.startswith("xkeysib-"):
-            api_key = cleaned
-        elif cleaned.startswith("xsmtpsib-") and not smtp_key:
-            smtp_key = cleaned
+    brevo_raw = _clean_key(os.getenv("BREVO_API_KEY", ""))
+    if brevo_raw.startswith("xsmtpsib-"):
+        smtp_key = brevo_raw
+    elif brevo_raw:
+        api_key = brevo_raw
 
     for var in ("SMTP_PASSWORD", "SMTP_KEY"):
         cleaned = _clean_key(os.getenv(var, ""))
         if cleaned.startswith("xsmtpsib-"):
-            smtp_key = cleaned
-        elif cleaned.startswith("xkeysib-") and not api_key:
-            api_key = cleaned  # pasted API key into SMTP field by mistake
+            smtp_key = cleaned or smtp_key
+        elif cleaned and not api_key and not cleaned.startswith("xsmtpsib-"):
+            api_key = cleaned
+
+    if not api_key or not smtp_key:
+        for value in os.environ.values():
+            cleaned = _clean_key(value)
+            if cleaned.startswith("xkeysib-") and not api_key:
+                api_key = cleaned
+            elif cleaned.startswith("xsmtpsib-") and not smtp_key:
+                smtp_key = cleaned
 
     return api_key, smtp_key
 
@@ -108,14 +106,23 @@ SMTP_PASSWORD = _brevo_smtp or (
 
 def brevo_key_hint() -> str:
     """Safe diagnostic for /health — never exposes the full key."""
-    if BREVO_API_KEY.startswith("xkeysib-"):
-        return "ok"
+    if BREVO_API_KEY:
+        prefix = BREVO_API_KEY[:8]
+        if BREVO_API_KEY.startswith("xkeysib-"):
+            return "ok"
+        return f"api key loaded (prefix {prefix})"
     raw = _clean_key(os.getenv("BREVO_API_KEY", ""))
     if not raw:
-        return "no xkeysib key found in any env var"
+        return "BREVO_API_KEY missing on server"
     if raw.startswith("xsmtpsib-"):
-        return "BREVO_API_KEY still has xsmtpsib — put xkeysib key there OR in SMTP_PASSWORD"
-    return f"unexpected prefix ({raw[:10]}...) — need xkeysib-"
+        return "BREVO_API_KEY has xsmtpsib — put xkeysib API key there instead"
+    return f"BREVO_API_KEY present but not loaded (prefix {raw[:8]})"
+
+
+def brevo_env_prefix() -> str:
+    """First 8 chars of raw BREVO_API_KEY env var — safe to expose."""
+    raw = _clean_key(os.getenv("BREVO_API_KEY", ""))
+    return raw[:8] if raw else "missing"
 
 # Must be a verified sender in Brevo (Senders & IP → Senders)
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip()
