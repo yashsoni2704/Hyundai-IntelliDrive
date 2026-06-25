@@ -41,6 +41,7 @@ from context_service import (
     mentions_unknown_vehicle,
     normalize_message,
     query_entity_terms,
+    search_result_matches_query,
     unknown_vehicle_message,
 )
 from embeddings import embed_texts, embed_query
@@ -282,6 +283,7 @@ class FAQVectorStore:
         """
         query_topic = detect_topic(query)
         query_vehicles = self._extract_vehicles(query)
+        entity_terms = self._entity_terms(query)
         candidates: list[tuple[float, float, dict]] = []
 
         for i, dist in enumerate(results["distances"][0]):
@@ -290,6 +292,8 @@ class FAQVectorStore:
             question = meta.get("question", results["documents"][0][i])
             answer = meta.get("answer", "")
 
+            if not self._faq_matches_distinctive_terms(entity_terms, question, answer):
+                continue
             if not self._topic_matches(query_topic, question, answer):
                 continue
             if not self._vehicle_matches(query_vehicles, question, answer, query_topic):
@@ -358,9 +362,15 @@ class FAQVectorStore:
 
         best_meta = self._pick_best_candidate(query, results)
         if not best_meta:
+            if mentions_unknown_vehicle(query):
+                return {"answer": unknown_vehicle_message(query), "found": False}
             return {"answer": NO_DATA_MESSAGE, "found": False}
 
         stored_answer = best_meta.get("answer", NO_DATA_MESSAGE)
+        if not search_result_matches_query(query, stored_answer):
+            if mentions_unknown_vehicle(query):
+                return {"answer": unknown_vehicle_message(query), "found": False}
+            return {"answer": NO_DATA_MESSAGE, "found": False}
         return {
             "answer": stored_answer,
             "found": True,
@@ -414,6 +424,29 @@ class FAQVectorStore:
                 best_metadata = metadata
 
         if best_score < 0.35 or not best_metadata:
+            if mentions_unknown_vehicle(query):
+                return {
+                    "answer": unknown_vehicle_message(query),
+                    "found": False,
+                    "similarity": round(best_score, 4),
+                    "search_mode": "keyword",
+                }
+            return {
+                "answer": NO_DATA_MESSAGE,
+                "found": False,
+                "similarity": round(best_score, 4),
+                "search_mode": "keyword",
+            }
+
+        stored_answer = best_metadata.get("answer", NO_DATA_MESSAGE)
+        if not search_result_matches_query(query, stored_answer):
+            if mentions_unknown_vehicle(query):
+                return {
+                    "answer": unknown_vehicle_message(query),
+                    "found": False,
+                    "similarity": round(best_score, 4),
+                    "search_mode": "keyword",
+                }
             return {
                 "answer": NO_DATA_MESSAGE,
                 "found": False,
@@ -422,7 +455,7 @@ class FAQVectorStore:
             }
 
         return {
-            "answer": best_metadata.get("answer", NO_DATA_MESSAGE),
+            "answer": stored_answer,
             "found": True,
             "similarity": round(min(best_score, 1.0), 4),
             "search_mode": "keyword",

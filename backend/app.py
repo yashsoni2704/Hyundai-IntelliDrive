@@ -46,6 +46,7 @@ from context_service import (
     normalize_message,
     prepare_clarification_context,
     resolve_query,
+    search_result_matches_query,
     unknown_vehicle_message,
     update_context,
 )
@@ -380,6 +381,23 @@ async def chat(
                 result = vector_store.search(alt)
                 if result["found"]:
                     message = alt
+
+        # Final guard: never return a Hyundai FAQ when the user asked about another car.
+        if result["found"] and not search_result_matches_query(original, result["answer"]):
+            if mentions_unknown_vehicle(original) or mentions_unknown_vehicle(message):
+                result = {
+                    "answer": unknown_vehicle_message(original),
+                    "found": False,
+                }
+            else:
+                result = {"answer": "Sorry, no data found.", "found": False}
+        elif result["found"] and (
+            mentions_unknown_vehicle(original) or mentions_unknown_vehicle(message)
+        ):
+            result = {
+                "answer": unknown_vehicle_message(original),
+                "found": False,
+            }
 
         suggestions = get_follow_up_suggestions(
             original, result["answer"], result["found"], used_ids, session_ctx

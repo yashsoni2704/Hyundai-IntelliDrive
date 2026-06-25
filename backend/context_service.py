@@ -42,10 +42,7 @@ VEHICLE_ALIASES: dict[str, str] = {
     "i-20": "i20",
 }
 
-NOT_OUR_CAR_MESSAGE = (
-    "Sorry, that model is not listed in our Hyundai knowledge base. "
-    "Please ask about Hyundai cars such as Creta, Venue, Verna, or Tucson."
-)
+NOT_OUR_CAR_MESSAGE = "This car is not in our database."
 
 # Common non-Hyundai brands — we only block the brand name, not every competitor model.
 COMPETITOR_BRANDS = frozenset({
@@ -65,12 +62,48 @@ COMPETITOR_BRANDS = frozenset({
     "mg",
     "bmw",
     "mercedes",
+    "benz",
     "audi",
     "volkswagen",
     "vw",
     "byd",
     "tesla",
+    "jaguar",
+    "landrover",
+    "land",
+    "rover",
+    "porsche",
+    "ferrari",
+    "lamborghini",
+    "bentley",
+    "rolls",
+    "royce",
+    "lexus",
+    "volvo",
+    "mini",
+    "fiat",
+    "peugeot",
+    "isuzu",
+    "force",
+    "datsun",
 })
+
+COMPETITOR_SPELLING_FIXES: dict[str, str] = {
+    "mercedies": "mercedes",
+    "mercedez": "mercedes",
+    "merceds": "mercedes",
+    "mercedezbenz": "mercedes",
+    "mercedesbenz": "mercedes",
+    "bmww": "bmw",
+    "bwm": "bmw",
+    "beemer": "bmw",
+    "beamer": "bmw",
+    "audii": "audi",
+    "toyata": "toyota",
+    "hunda": "honda",
+    "maruthi": "maruti",
+    "suzuky": "suzuki",
+}
 
 TOPIC_QUERY_TERMS = {
     "price",
@@ -234,10 +267,25 @@ def query_entity_terms(query: str) -> set[str]:
     }
 
 
+def _is_competitor_token(token: str) -> bool:
+    """True when a token names or closely misspells a non-Hyundai automaker."""
+    normalized = token.lower().strip()
+    if not normalized:
+        return False
+    if normalized in COMPETITOR_BRANDS:
+        return True
+    if normalized in COMPETITOR_SPELLING_FIXES:
+        return True
+    if len(normalized) >= 3:
+        if get_close_matches(normalized, list(COMPETITOR_BRANDS), n=1, cutoff=0.84):
+            return True
+    return False
+
+
 def mentions_competitor_brand(query: str) -> bool:
     """True when the user names a known non-Hyundai automaker."""
-    tokens = set(re.findall(r"[a-z0-9]+", normalize_message(query).lower()))
-    return bool(tokens & COMPETITOR_BRANDS)
+    tokens = re.findall(r"[a-z0-9]+", normalize_message(query).lower())
+    return any(_is_competitor_token(token) for token in tokens)
 
 
 def unknown_vehicle_terms(query: str) -> list[str]:
@@ -255,14 +303,21 @@ def unknown_vehicle_terms(query: str) -> list[str]:
 
 def unknown_vehicle_message(query: str) -> str:
     """User-facing message when a non-Hyundai car is mentioned."""
-    terms = unknown_vehicle_terms(query)
-    if terms:
-        label = " ".join(terms).title()
-        return (
-            f"Sorry, {label} is not listed in our Hyundai knowledge base. "
-            "Please ask about Hyundai models such as Creta, Venue, Verna, or Tucson."
-        )
     return NOT_OUR_CAR_MESSAGE
+
+
+def search_result_matches_query(query: str, answer: str) -> bool:
+    """
+    False when semantic search returns an FAQ that does not mention the car
+    the user asked about (e.g. Creta price for 'price of bmw').
+    """
+    if mentions_unknown_vehicle(query):
+        return False
+    entity_terms = query_entity_terms(query)
+    if not entity_terms:
+        return True
+    blob = f"{query} {answer}".lower()
+    return all(term in blob for term in entity_terms)
 
 
 def mentions_unknown_vehicle(query: str) -> bool:
@@ -433,8 +488,14 @@ def normalize_message(text: str) -> str:
     tokens = re.findall(r"[a-z0-9]+", lower)
     fixed_tokens: list[str] = []
     for token in tokens:
+        if token in COMPETITOR_SPELLING_FIXES:
+            fixed_tokens.append(COMPETITOR_SPELLING_FIXES[token])
+            continue
         if token in SPELLING_FIXES:
             fixed_tokens.append(SPELLING_FIXES[token])
+            continue
+        if _is_competitor_token(token):
+            fixed_tokens.append(token)
             continue
         match = get_close_matches(token, VEHICLE_MODELS, n=1, cutoff=0.82)
         if match and len(token) >= 4:
