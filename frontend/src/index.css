@@ -583,21 +583,6 @@ p, li { margin: 0; }
   text-align: center;
 }
 
-.otp-field-row {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
-}
-
-.otp-field-row .otp-input {
-  flex: 1;
-}
-
-.otp-copy-btn {
-  flex-shrink: 0;
-  min-width: 72px;
-}
-
 .auth-form input,
 .auth-form select,
 .booking-form input,
