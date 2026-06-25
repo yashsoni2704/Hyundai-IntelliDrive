@@ -16,7 +16,10 @@ from pathlib import Path
 
 def main() -> None:
     print("=== Hyundai Knowledge Assistant — Render boot ===", flush=True)
+    print("DEPLOY_VERSION=2.3.0-brevo-email", flush=True)
     print(f"PORT={os.environ.get('PORT', 'NOT SET')}", flush=True)
+    if os.environ.get("RESEND_API_KEY"):
+        print("WARNING: RESEND_API_KEY is still set — delete it from Render Environment", flush=True)
 
     root = Path(__file__).resolve().parent
     backend = root / "backend"

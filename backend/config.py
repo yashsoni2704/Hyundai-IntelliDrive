@@ -64,7 +64,10 @@ _smtp_password = (
     os.getenv("SMTP_PASSWORD", "").replace(" ", "")
     or os.getenv("SMTP_KEY", "").replace(" ", "")
 )
-_brevo_raw = os.getenv("BREVO_API_KEY", "").strip()
+_brevo_raw = (
+    os.getenv("BREVO_API_KEY", "").strip()
+    or os.getenv("BREVO_API", "").strip()
+)
 
 # xsmtpsib- = SMTP key (local only). xkeysib- = API key (required on Render free).
 if _brevo_raw.startswith("xsmtpsib-"):

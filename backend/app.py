@@ -29,7 +29,7 @@ from booking_service import get_next_available_slots
 from chat_log_service import log_chat_interaction
 from email_service import email_configured, email_provider
 from chroma_db import vector_store
-from config import CORS_ORIGINS, FRONTEND_DIST
+from config import CORS_ORIGINS, FRONTEND_DIST, BREVO_API_KEY, ON_RENDER, SMTP_FROM_EMAIL
 from database import get_db, init_db
 from models import User
 from routers.auth_router import router as auth_router
@@ -74,6 +74,23 @@ async def lifespan(app: FastAPI):
     All heavy work (SQLite + ChromaDB + embeddings) runs in a background task.
     """
     logger.info("Lifespan start — PORT=%s", os.getenv("PORT", "not set"))
+    logger.info(
+        "Email boot check — provider=%s configured=%s from=%s render=%s",
+        email_provider(),
+        email_configured(),
+        SMTP_FROM_EMAIL or "(missing)",
+        ON_RENDER,
+    )
+    if os.getenv("RESEND_API_KEY"):
+        logger.error(
+            "RESEND_API_KEY is still in environment but Resend was removed. "
+            "Delete RESEND_API_KEY and RESEND_FROM_EMAIL on Render, then redeploy."
+        )
+    if ON_RENDER and not BREVO_API_KEY.startswith("xkeysib-"):
+        logger.error(
+            "Render needs BREVO_API_KEY starting with xkeysib- (API key). "
+            "SMTP keys (xsmtpsib-) do not work on Render free tier."
+        )
 
     async def _background_boot() -> None:
         try:
@@ -100,7 +117,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Hyundai Knowledge Assistant",
     description="Semantic FAQ retrieval, auth, and test drive bookings.",
-    version="2.2.0",
+    version="2.3.0",
     lifespan=lifespan,
 )
 logger.info("FastAPI app created — uvicorn will bind to PORT next")
@@ -183,13 +200,15 @@ async def health_check():
 
     return {
         "status": "ok",
-        "version": "2.2.0",
+        "version": "2.3.0",
+        "deploy_tag": "brevo-email-jun2025",
         "knowledge_base": kb_status,
         "knowledge_base_error": vector_store.init_error,
         "auth": True,
         "bookings": True,
         "email_configured": email_configured(),
         "email_provider": email_provider(),
+        "email_ready": email_configured() and (not ON_RENDER or BREVO_API_KEY.startswith("xkeysib-")),
     }
 
 
