@@ -66,6 +66,8 @@ SMTP_PASSWORD = (
 )
 # Must be a verified sender in Brevo (Senders & IP → Senders)
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip()
+# Brevo HTTP API — works on Render free tier (HTTPS). Get at app.brevo.com → SMTP & API → API keys
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"
 
 # Comma-separated list of allowed frontend origins for CORS

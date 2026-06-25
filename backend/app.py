@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from auth_utils import get_optional_user
 from booking_service import get_next_available_slots
 from chat_log_service import log_chat_interaction
-from email_service import email_configured
+from email_service import email_configured, email_provider
 from chroma_db import vector_store
 from config import CORS_ORIGINS, FRONTEND_DIST
 from database import get_db, init_db
@@ -189,6 +189,7 @@ async def health_check():
         "auth": True,
         "bookings": True,
         "email_configured": email_configured(),
+        "email_provider": email_provider(),
     }
 
 
