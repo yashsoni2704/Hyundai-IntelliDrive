@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 # BASE_DIR = backend/ folder; PROJECT_ROOT = Hyundai_chatbot/ folder
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
-load_dotenv(BASE_DIR / ".env")  # load_dotenv reads KEY=value pairs into os.environ
+load_dotenv(BASE_DIR / ".env", override=False)  # never override Render/platform env vars
 
 # --- File paths ---
 DATA_DIR = PROJECT_ROOT / "data"
@@ -61,43 +61,62 @@ SMTP_HOST = os.getenv("SMTP_HOST") or os.getenv("SMTP_SERVER", "smtp-relay.brevo
 _default_smtp_port = "2525" if os.getenv("RENDER") else "587"
 SMTP_PORT = int(os.getenv("SMTP_PORT", _default_smtp_port))
 SMTP_USER = os.getenv("SMTP_USER") or os.getenv("LOGIN", "")
-_smtp_password = (
-    os.getenv("SMTP_PASSWORD", "").replace(" ", "")
-    or os.getenv("SMTP_KEY", "").replace(" ", "")
-)
+
+
 def _clean_key(value: str) -> str:
     return value.strip().strip('"').strip("'").strip()
 
 
-_brevo_raw = _clean_key(
-    os.getenv("BREVO_API_KEY", "")
-    or os.getenv("BREVO_API", "")
-    or os.getenv("BREVO_KEY", "")
+def _scan_env_keys() -> tuple[str, str]:
+    """Find Brevo API key (xkeysib) and SMTP key (xsmtpsib) from any common env var."""
+    api_key = ""
+    smtp_key = ""
+    for name, value in os.environ.items():
+        if not value:
+            continue
+        cleaned = _clean_key(value)
+        if cleaned.startswith("xkeysib-") and not api_key:
+            api_key = cleaned
+        elif cleaned.startswith("xsmtpsib-") and not smtp_key:
+            smtp_key = cleaned
+
+    # Explicit vars take priority (user may have both keys in correct fields)
+    for var in ("BREVO_API_KEY", "BREVO_API", "BREVO_KEY"):
+        cleaned = _clean_key(os.getenv(var, ""))
+        if cleaned.startswith("xkeysib-"):
+            api_key = cleaned
+        elif cleaned.startswith("xsmtpsib-") and not smtp_key:
+            smtp_key = cleaned
+
+    for var in ("SMTP_PASSWORD", "SMTP_KEY"):
+        cleaned = _clean_key(os.getenv(var, ""))
+        if cleaned.startswith("xsmtpsib-"):
+            smtp_key = cleaned
+        elif cleaned.startswith("xkeysib-") and not api_key:
+            api_key = cleaned  # pasted API key into SMTP field by mistake
+
+    return api_key, smtp_key
+
+
+_brevo_api, _brevo_smtp = _scan_env_keys()
+BREVO_API_KEY = _brevo_api
+SMTP_PASSWORD = _brevo_smtp or (
+    os.getenv("SMTP_PASSWORD", "").replace(" ", "")
+    or os.getenv("SMTP_KEY", "").replace(" ", "")
 )
-
-# xsmtpsib- = SMTP key (local only). xkeysib- = API key (required on Render free).
-if _brevo_raw.startswith("xsmtpsib-"):
-    if not _smtp_password or _smtp_password.startswith("your-"):
-        _smtp_password = _brevo_raw
-    BREVO_API_KEY = ""
-elif _brevo_raw.startswith("xkeysib-"):
-    BREVO_API_KEY = _brevo_raw
-else:
-    BREVO_API_KEY = _brevo_raw
-
-SMTP_PASSWORD = _smtp_password
 
 
 def brevo_key_hint() -> str:
     """Safe diagnostic for /health — never exposes the full key."""
-    raw = _clean_key(os.getenv("BREVO_API_KEY", "") or os.getenv("BREVO_API", "") or os.getenv("BREVO_KEY", ""))
-    if not raw:
-        return "BREVO_API_KEY is empty — add your xkeysib- key on Render"
-    if raw.startswith("xkeysib-"):
+    if BREVO_API_KEY.startswith("xkeysib-"):
         return "ok"
+    raw = _clean_key(os.getenv("BREVO_API_KEY", ""))
+    if not raw:
+        return "no xkeysib key found in any env var"
     if raw.startswith("xsmtpsib-"):
-        return "wrong key type — BREVO_API_KEY has xsmtpsib (SMTP). Use xkeysib API key instead"
-    return f"unexpected key prefix ({raw[:10]}...) — must start with xkeysib-"
+        return "BREVO_API_KEY still has xsmtpsib — put xkeysib key there OR in SMTP_PASSWORD"
+    return f"unexpected prefix ({raw[:10]}...) — need xkeysib-"
+
 # Must be a verified sender in Brevo (Senders & IP → Senders)
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip()
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"

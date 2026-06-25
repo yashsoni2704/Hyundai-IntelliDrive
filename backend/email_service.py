@@ -11,7 +11,6 @@ from email.mime.text import MIMEText
 from config import (
     BREVO_API_KEY,
     DEBUG_MODE,
-    ON_RENDER,
     SMTP_FROM_EMAIL,
     SMTP_HOST,
     SMTP_PASSWORD,
@@ -306,12 +305,6 @@ def send_otp_email(to_email: str, otp_code: str, purpose: str) -> None:
         if DEBUG_MODE:
             return
         raise EmailDeliveryError("Email is not configured on the server")
-
-    if ON_RENDER and not _brevo_api_configured():
-        raise EmailDeliveryError(
-            "Server email not set up. Add a Brevo API key (xkeysib-...) as BREVO_API_KEY on Render. "
-            "SMTP keys (xsmtpsib-...) do not work on Render free tier."
-        )
 
     if _brevo_api_configured():
         try:
