@@ -98,7 +98,7 @@ def _build_plain_body(otp_code: str, purpose: str) -> str:
         f"Hyundai Knowledge Assistant\n"
         f"{copy['title']}\n\n"
         f"{copy['body']}\n\n"
-        f"Verification code: {otp_code}\n\n"
+        f"Your verification code (select and copy):\n{otp_code}\n\n"
         f"This code expires in 10 minutes.\n\n"
         f"If you did not request this email, no action is required.\n\n"
         f"— Hyundai Knowledge Assistant\n"
@@ -157,6 +157,9 @@ def _build_html_body(otp_code: str, purpose: str) -> str:
 
               <p style="margin:0 0 14px;font-size:13px;font-weight:600;color:#1A2430;">
                 Verification code
+              </p>
+              <p style="margin:0 0 10px;font-size:12px;line-height:1.5;color:#6B7785;">
+                Select the code below and copy it into the app (or use the Copy button on the OTP screen).
               </p>
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">
                 {digits_row}

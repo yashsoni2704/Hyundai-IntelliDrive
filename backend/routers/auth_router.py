@@ -154,8 +154,16 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         )
 
     user = db.query(User).filter(User.email == email).first()
-    if not user or not verify_password(body.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email. Please create an account to use the chatbot.",
+        )
+    if not verify_password(body.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect password. Try again or use Forgot password.",
+        )
 
     create_and_send_otp(db, email, "login_2fa")
     return OtpPendingResponse(
@@ -217,7 +225,10 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
     email = body.email.lower().strip()
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found in our records")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email. Please create an account to use the chatbot.",
+        )
 
     create_and_send_otp(db, email, "password_reset")
     return {"message": "Password reset OTP sent to your email.", "email": email}

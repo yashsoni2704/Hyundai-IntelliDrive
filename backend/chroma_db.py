@@ -34,7 +34,6 @@ from data_loader import (
     compute_excel_hash,
 )
 from context_service import (
-    NOT_OUR_CAR_MESSAGE,
     TOPIC_QUERY_TERMS,
     VEHICLE_MODELS,
     detect_topic,
@@ -42,6 +41,7 @@ from context_service import (
     mentions_unknown_vehicle,
     normalize_message,
     query_entity_terms,
+    unknown_vehicle_message,
 )
 from embeddings import embed_texts, embed_query
 
@@ -326,7 +326,7 @@ class FAQVectorStore:
             return {"answer": NO_DATA_MESSAGE, "found": False}
 
         if self._is_out_of_scope(query):
-            return {"answer": NOT_OUR_CAR_MESSAGE, "found": False}
+            return {"answer": unknown_vehicle_message(query), "found": False}
 
         if LIGHTWEIGHT_MODE or not self._semantic_search_available:
             return self._lexical_search(query)

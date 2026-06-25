@@ -27,6 +27,9 @@ function authHeaders() {
 }
 
 function parseApiError(data, status) {
+  if (status === 404 && typeof data.detail === 'string') {
+    return data.detail
+  }
   if (status === 404) {
     return 'API route not found. Restart the backend: cd backend && python -m uvicorn app:app --port 8000'
   }
@@ -64,7 +67,9 @@ async function request(path, options = {}) {
     })
   } catch {
     throw new Error(
-      'Cannot reach the backend server. Run start_backend.bat (or: cd backend && python -m uvicorn app:app --port 8000), then try again.'
+      import.meta.env.DEV
+        ? 'Cannot reach the backend server. Run start_backend.bat (or: cd backend && python -m uvicorn app:app --port 8000), then try again.'
+        : 'Cannot reach the backend server. The Render backend may be waking up (free tier takes ~1 min). Open https://hyundai-intellidrive.onrender.com/health in a new tab, wait until it loads, then try again.'
     )
   }
 

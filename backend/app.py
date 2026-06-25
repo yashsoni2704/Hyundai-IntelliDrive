@@ -36,7 +36,6 @@ from routers.auth_router import router as auth_router
 from routers.bookings_router import router as bookings_router
 from routers.admin_router import router as admin_router
 from context_service import (
-    NOT_OUR_CAR_MESSAGE,
     clarification_message,
     coerce_context,
     default_context,
@@ -47,6 +46,7 @@ from context_service import (
     normalize_message,
     prepare_clarification_context,
     resolve_query,
+    unknown_vehicle_message,
     update_context,
 )
 from routers.session_router import router as session_router
@@ -239,7 +239,7 @@ async def chat(
 
         # Reject non-Hyundai cars BEFORE context expansion (prevents "tata" -> Creta bug)
         if mentions_unknown_vehicle(original):
-            answer = NOT_OUR_CAR_MESSAGE
+            answer = unknown_vehicle_message(original)
             response = ChatResponse(
                 answer=answer,
                 found=False,

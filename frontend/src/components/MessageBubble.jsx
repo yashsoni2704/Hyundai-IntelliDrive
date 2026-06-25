@@ -12,6 +12,8 @@ export default function MessageBubble({
   const isLoading = message.loading
   const isError = message.error
   const isSlots = message.response_type === 'slots'
+  const isCompactUserText =
+    isUser && !isLoading && (message.content?.length ?? 0) <= 80 && !message.content?.includes('\n')
 
   return (
     <div className={`message-row ${isUser ? 'message-row--user' : 'message-row--bot'}`}>
@@ -36,7 +38,7 @@ export default function MessageBubble({
               </span>
             </div>
           ) : (
-            <p>{message.content}</p>
+            <p className={isCompactUserText ? 'message-text--compact' : undefined}>{message.content}</p>
           )}
         </div>
 

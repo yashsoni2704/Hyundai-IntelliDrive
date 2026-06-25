@@ -389,30 +389,45 @@ p, li { margin: 0; }
 
 .message-row--user .message-block {
   align-items: flex-end;
-  max-width: 70%;
+  max-width: 85%;
 }
 
 .message-bubble {
-  max-width: 70%;
   padding: 11px 16px;
   border-radius: 16px;
   font-size: 14.5px;
   line-height: 1.65;
-  word-wrap: break-word;
+  flex-shrink: 0;
 }
 
 .message-bubble--user {
+  width: fit-content;
+  max-width: min(560px, 90%);
   background: #2F2F2F;
   border: 1px solid #424242;
   border-bottom-right-radius: 4px;
   color: #ECECEC;
 }
 
+.message-bubble--user p {
+  margin: 0;
+}
+
+.message-bubble--user p.message-text--compact {
+  white-space: nowrap;
+}
+
 .message-bubble--bot {
+  max-width: min(560px, 90%);
   background: #303030;
   border: 1px solid #424242;
   border-bottom-left-radius: 4px;
   color: #ECECEC;
+}
+
+.message-bubble--bot p {
+  white-space: pre-line;
+  margin: 0;
 }
 
 .message-bubble--error {
@@ -551,6 +566,32 @@ p, li { margin: 0; }
   color: #A0A0A0;
 }
 
+.field-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #C5C5C5;
+}
+
+.btn-link.inline {
+  display: inline;
+  text-align: center;
+}
+
+.otp-field-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.otp-field-row .otp-input {
+  flex: 1;
+}
+
+.otp-copy-btn {
+  flex-shrink: 0;
+  min-width: 72px;
+}
+
 .auth-form input,
 .auth-form select,
 .booking-form input,
@@ -645,6 +686,13 @@ p, li { margin: 0; }
   border-radius: 8px;
   font-size: 13px;
   margin-bottom: 12px;
+}
+
+.form-info--after-error {
+  margin-top: -4px;
+  background: #303030;
+  border-color: #424242;
+  color: #C5C5C5;
 }
 
 .form-dev-otp {

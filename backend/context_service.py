@@ -43,9 +43,34 @@ VEHICLE_ALIASES: dict[str, str] = {
 }
 
 NOT_OUR_CAR_MESSAGE = (
-    "Sorry, that is not a Hyundai model in our knowledge base. "
+    "Sorry, that model is not listed in our Hyundai knowledge base. "
     "Please ask about Hyundai cars such as Creta, Venue, Verna, or Tucson."
 )
+
+# Common non-Hyundai brands — we only block the brand name, not every competitor model.
+COMPETITOR_BRANDS = frozenset({
+    "tata",
+    "maruti",
+    "suzuki",
+    "mahindra",
+    "honda",
+    "toyota",
+    "kia",
+    "skoda",
+    "jeep",
+    "ford",
+    "nissan",
+    "renault",
+    "citroen",
+    "mg",
+    "bmw",
+    "mercedes",
+    "audi",
+    "volkswagen",
+    "vw",
+    "byd",
+    "tesla",
+})
 
 TOPIC_QUERY_TERMS = {
     "price",
@@ -149,12 +174,15 @@ def build_known_hyundai_terms() -> frozenset[str]:
     for model in VEHICLE_MODELS:
         terms.add(model.lower())
         for part in model.split():
-            terms.add(part)
+            if len(part) >= 3:
+                terms.add(part)
     for alias, canonical in VEHICLE_ALIASES.items():
         terms.add(alias.lower())
         terms.add(canonical.lower())
         for part in alias.split():
-            terms.add(part)
+            if len(part) >= 3:
+                terms.add(part)
+    terms.add("i20")
     return frozenset(terms)
 
 
@@ -170,12 +198,23 @@ def get_known_hyundai_terms() -> frozenset[str]:
 
 def is_our_hyundai_model(term: str) -> bool:
     """True when a token matches a Hyundai model in our database."""
-    token = term.lower()
-    known = get_known_hyundai_terms()
-    if token in known:
+    token = term.lower().strip()
+    if len(token) < 2:
+        return False
+    if token in get_known_hyundai_terms():
         return True
-    for model_token in known:
-        if len(token) >= 3 and (token in model_token or model_token in token):
+    if token == "i20":
+        return True
+    if len(token) >= 4:
+        match = get_close_matches(token, VEHICLE_MODELS, n=1, cutoff=0.86)
+        if match:
+            return True
+    for model in VEHICLE_MODELS:
+        if len(token) >= 3 and len(model) >= 3 and (token in model or model in token):
+            return True
+    for alias in VEHICLE_ALIASES:
+        alias_l = alias.lower()
+        if len(token) >= 3 and len(alias_l) >= 3 and (token in alias_l or alias_l in token):
             return True
     return False
 
@@ -195,11 +234,44 @@ def query_entity_terms(query: str) -> set[str]:
     }
 
 
+def mentions_competitor_brand(query: str) -> bool:
+    """True when the user names a known non-Hyundai automaker."""
+    tokens = set(re.findall(r"[a-z0-9]+", normalize_message(query).lower()))
+    return bool(tokens & COMPETITOR_BRANDS)
+
+
+def unknown_vehicle_terms(query: str) -> list[str]:
+    """Non-Hyundai model-like tokens in the query (original word order)."""
+    normalized = normalize_message(query)
+    return [
+        term
+        for term in re.findall(r"[a-z0-9]+", normalized.lower())
+        if term not in QUERY_STOPWORDS
+        and term not in TOPIC_QUERY_TERMS
+        and term not in GENERIC_AUTO_TERMS
+        and not is_our_hyundai_model(term)
+    ]
+
+
+def unknown_vehicle_message(query: str) -> str:
+    """User-facing message when a non-Hyundai car is mentioned."""
+    terms = unknown_vehicle_terms(query)
+    if terms:
+        label = " ".join(terms).title()
+        return (
+            f"Sorry, {label} is not listed in our Hyundai knowledge base. "
+            "Please ask about Hyundai models such as Creta, Venue, Verna, or Tucson."
+        )
+    return NOT_OUR_CAR_MESSAGE
+
+
 def mentions_unknown_vehicle(query: str) -> bool:
     """
     True when the user names a car that is not in our Hyundai model list.
     Generic questions (e.g. 'what is the price') return False — clarification handles those.
     """
+    if mentions_competitor_brand(query):
+        return True
     entity_terms = query_entity_terms(query)
     if not entity_terms:
         return False

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   forgotPassword,
   loginAdmin,
@@ -20,6 +20,51 @@ const VIEWS = {
   RESET_PASSWORD: 'reset_password',
 }
 
+function OtpField({ otp, setOtp, label = 'Verification code' }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    if (!otp) return
+    try {
+      await navigator.clipboard.writeText(otp)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* clipboard blocked */
+    }
+  }
+
+  return (
+    <label>
+      {label}
+      <div className="otp-field-row">
+        <input
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          value={otp}
+          onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          maxLength={6}
+          required
+          autoFocus
+          className="otp-input"
+          placeholder="000000"
+        />
+        <button
+          type="button"
+          className="btn-secondary otp-copy-btn"
+          onClick={handleCopy}
+          disabled={otp.length !== 6}
+          title="Copy OTP"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <span className="form-hint">Paste the 6-digit code from your email, or use Copy after typing.</span>
+    </label>
+  )
+}
+
 export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }) {
   const { login } = useAuth()
   const [view, setView] = useState(initialView)
@@ -33,20 +78,45 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
   const [info, setInfo] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const resetForm = useCallback(() => {
+    setEmail('')
+    setPassword('')
+    setFullName('')
+    setOtp('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setError('')
+    setInfo('')
+  }, [])
+
   useEffect(() => {
     if (isOpen) {
       setView(initialView)
-      setError('')
-      setInfo('')
-      setOtp('')
+      resetForm()
     }
-  }, [isOpen, initialView])
+  }, [isOpen, initialView, resetForm])
 
   if (!isOpen) return null
 
   const resetMessages = () => {
     setError('')
     setInfo('')
+  }
+
+  const goToLogin = () => {
+    resetMessages()
+    setPassword('')
+    setOtp('')
+    setView(VIEWS.LOGIN)
+  }
+
+  const goToRegister = (keepEmail = false, keepMessages = false) => {
+    if (!keepMessages) resetMessages()
+    if (!keepEmail) setEmail('')
+    setPassword('')
+    setFullName('')
+    setOtp('')
+    setView(VIEWS.REGISTER)
   }
 
   const handleRegister = async (e) => {
@@ -59,7 +129,14 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
       setOtp('')
       setView(VIEWS.REGISTER_OTP)
     } catch (err) {
-      setError(err.message || 'Registration failed')
+      const msg = err.message || 'Registration failed'
+      if (msg.toLowerCase().includes('already registered')) {
+        setError('This email is already registered. Please sign in instead.')
+        setPassword('')
+        setView(VIEWS.LOGIN)
+      } else {
+        setError(msg)
+      }
     } finally {
       setLoading(false)
     }
@@ -74,7 +151,7 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
       login(data.access_token, data.user)
       onClose()
     } catch (err) {
-      setError(err.message || 'Invalid OTP')
+      setError(err.message || 'Invalid or expired code. Check your email and try again.')
     } finally {
       setLoading(false)
     }
@@ -101,11 +178,22 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
         onClose()
         return
       }
-      setInfo(data.message)
+      setInfo(data.message || 'Enter the verification code sent to your email.')
       setOtp('')
       setView(VIEWS.LOGIN_OTP)
     } catch (err) {
-      setError(err.message || 'Login failed')
+      setPassword('')
+      if (err.status === 404) {
+        setError(err.message || 'No account found. Please create an account to use the chatbot.')
+        setInfo('Fill in your details below to sign up.')
+        goToRegister(true, true)
+      } else if (err.status === 401) {
+        setError(err.message || 'Incorrect password.')
+      } else if (err.status === 503) {
+        setError('Could not send verification email. Try again in a moment.')
+      } else {
+        setError(err.message || 'Sign in failed. Check your details and try again.')
+      }
     } finally {
       setLoading(false)
     }
@@ -120,7 +208,7 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
       login(data.access_token, data.user)
       onClose()
     } catch (err) {
-      setError(err.message || 'Invalid OTP')
+      setError(err.message || 'Invalid or expired code. Check your email and try again.')
     } finally {
       setLoading(false)
     }
@@ -136,7 +224,13 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
       setOtp('')
       setView(VIEWS.RESET_OTP)
     } catch (err) {
-      setError(err.message || 'Email not found in our records')
+      if (err.status === 404) {
+        setError(err.message || 'No account found with this email. Please create an account first.')
+        setInfo('You can sign up below with the same email.')
+        goToRegister(true, true)
+      } else {
+        setError(err.message || 'Could not send reset code. Try again.')
+      }
     } finally {
       setLoading(false)
     }
@@ -146,7 +240,7 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
     e.preventDefault()
     resetMessages()
     if (otp.length !== 6) {
-      setError('Enter the 6-digit OTP')
+      setError('Enter the full 6-digit code from your email.')
       return
     }
     setView(VIEWS.RESET_PASSWORD)
@@ -156,20 +250,21 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
     e.preventDefault()
     resetMessages()
     if (newPassword !== confirmPassword) {
-      setError('Passwords do not match')
+      setError('Passwords do not match.')
       return
     }
     setLoading(true)
     try {
       await resetPassword({ email, otp, new_password: newPassword })
-      setInfo('Password updated. Please sign in.')
-      setView(VIEWS.LOGIN)
+      setInfo('Password updated. Sign in with your new password.')
+      setError('')
       setPassword('')
       setOtp('')
       setNewPassword('')
       setConfirmPassword('')
+      setView(VIEWS.LOGIN)
     } catch (err) {
-      setError(err.message || 'Failed to reset password')
+      setError(err.message || 'Failed to reset password. Request a new code and try again.')
     } finally {
       setLoading(false)
     }
@@ -185,8 +280,19 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
     [VIEWS.RESET_PASSWORD]: 'Set new password',
   }
 
+  const preventAutofill = {
+    autoComplete: 'off',
+    autoCorrect: 'off',
+    autoCapitalize: 'off',
+    spellCheck: false,
+    readOnly: true,
+    onFocus: (e) => {
+      e.target.readOnly = false
+    },
+  }
+
   return (
-    <div className="modal-overlay">
+    <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card auth-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{titles[view]}</h2>
@@ -198,18 +304,37 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
         </div>
 
         <div className="modal-body">
-          {error && <p className="form-error">{error}</p>}
-          {info && <p className="form-info">{info}</p>}
+          {error && <p className="form-error" role="alert">{error}</p>}
+          {info && <p className={`form-info${error ? ' form-info--after-error' : ''}`}>{info}</p>}
 
           {view === VIEWS.LOGIN && (
-            <form onSubmit={handleLogin} className="auth-form">
+            <form onSubmit={handleLogin} className="auth-form" autoComplete="off">
               <label>
-                Email or admin username
-                <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+                <span className="field-label">Email</span>
+                <input
+                  type="email"
+                  name="hyundai_login_email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoFocus
+                  {...preventAutofill}
+                />
               </label>
               <label>
-                Password
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                <span className="field-label">Password</span>
+                <input
+                  type="password"
+                  name="hyundai_login_password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  autoComplete="new-password"
+                  readOnly
+                  onFocus={(e) => {
+                    e.target.readOnly = false
+                  }}
+                />
               </label>
               <button type="submit" className="btn-primary" disabled={loading}>
                 {loading ? 'Signing in...' : 'Continue'}
@@ -219,7 +344,7 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
               </button>
               <p className="auth-switch">
                 No account?{' '}
-                <button type="button" className="btn-link" onClick={() => { resetMessages(); setView(VIEWS.REGISTER) }}>
+                <button type="button" className="btn-link inline" onClick={() => goToRegister(false)}>
                   Sign up
                 </button>
               </p>
@@ -227,25 +352,51 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
           )}
 
           {view === VIEWS.REGISTER && (
-            <form onSubmit={handleRegister} className="auth-form">
+            <form onSubmit={handleRegister} className="auth-form" autoComplete="off">
               <label>
-                Full name
-                <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} />
+                <span className="field-label">Full name</span>
+                <input
+                  type="text"
+                  name="hyundai_register_name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  {...preventAutofill}
+                />
               </label>
               <label>
-                Email
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <span className="field-label">Email</span>
+                <input
+                  type="email"
+                  name="hyundai_register_email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoFocus
+                  {...preventAutofill}
+                />
               </label>
               <label>
-                Password
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+                <span className="field-label">Password</span>
+                <input
+                  type="password"
+                  name="hyundai_register_password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                  readOnly
+                  onFocus={(e) => {
+                    e.target.readOnly = false
+                  }}
+                />
               </label>
               <button type="submit" className="btn-primary" disabled={loading}>
                 {loading ? 'Creating...' : 'Create account'}
               </button>
               <p className="auth-switch">
                 Already have an account?{' '}
-                <button type="button" className="btn-link" onClick={() => { resetMessages(); setView(VIEWS.LOGIN) }}>
+                <button type="button" className="btn-link inline" onClick={goToLogin}>
                   Sign in
                 </button>
               </p>
@@ -253,20 +404,9 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
           )}
 
           {view === VIEWS.REGISTER_OTP && (
-            <form onSubmit={handleVerifyRegisterOtp} className="auth-form">
-              <p className="form-hint">Enter the 6-digit code sent to {email}</p>
-              <label>
-                Verification code
-                <input
-                  type="text"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  maxLength={6}
-                  required
-                  autoFocus
-                  className="otp-input"
-                />
-              </label>
+            <form onSubmit={handleVerifyRegisterOtp} className="auth-form" autoComplete="off">
+              <p className="form-hint">We sent a 6-digit code to <strong>{email}</strong></p>
+              <OtpField otp={otp} setOtp={setOtp} label="Verification code" />
               <button type="submit" className="btn-primary" disabled={loading || otp.length !== 6}>
                 {loading ? 'Verifying...' : 'Verify & continue'}
               </button>
@@ -274,36 +414,33 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
           )}
 
           {view === VIEWS.FORGOT && (
-            <form onSubmit={handleForgot} className="auth-form">
-              <p className="form-hint">Enter your email. We will send a 6-digit OTP to reset your password.</p>
+            <form onSubmit={handleForgot} className="auth-form" autoComplete="off">
+              <p className="form-hint">Enter your account email. We will send a reset code.</p>
               <label>
-                Email
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+                <span className="field-label">Email</span>
+                <input
+                  type="email"
+                  name="hyundai_forgot_email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoFocus
+                  {...preventAutofill}
+                />
               </label>
               <button type="submit" className="btn-primary" disabled={loading}>
                 {loading ? 'Sending...' : 'Send OTP'}
               </button>
-              <button type="button" className="btn-link" onClick={() => { resetMessages(); setView(VIEWS.LOGIN) }}>
+              <button type="button" className="btn-link" onClick={goToLogin}>
                 Back to sign in
               </button>
             </form>
           )}
 
           {view === VIEWS.LOGIN_OTP && (
-            <form onSubmit={handleVerifyLoginOtp} className="auth-form">
-              <p className="form-hint">Enter the 6-digit code sent to {email}</p>
-              <label>
-                Verification code
-                <input
-                  type="text"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  maxLength={6}
-                  required
-                  autoFocus
-                  className="otp-input"
-                />
-              </label>
+            <form onSubmit={handleVerifyLoginOtp} className="auth-form" autoComplete="off">
+              <p className="form-hint">We sent a 6-digit code to <strong>{email}</strong></p>
+              <OtpField otp={otp} setOtp={setOtp} label="Verification code" />
               <button type="submit" className="btn-primary" disabled={loading || otp.length !== 6}>
                 {loading ? 'Verifying...' : 'Verify & sign in'}
               </button>
@@ -311,20 +448,9 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
           )}
 
           {view === VIEWS.RESET_OTP && (
-            <form onSubmit={handleVerifyResetOtp} className="auth-form">
-              <p className="form-hint">Enter the 6-digit code sent to {email}</p>
-              <label>
-                Reset code
-                <input
-                  type="text"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  maxLength={6}
-                  required
-                  autoFocus
-                  className="otp-input"
-                />
-              </label>
+            <form onSubmit={handleVerifyResetOtp} className="auth-form" autoComplete="off">
+              <p className="form-hint">We sent a reset code to <strong>{email}</strong></p>
+              <OtpField otp={otp} setOtp={setOtp} label="Reset code" />
               <button type="submit" className="btn-primary" disabled={otp.length !== 6}>
                 Continue
               </button>
@@ -332,14 +458,28 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
           )}
 
           {view === VIEWS.RESET_PASSWORD && (
-            <form onSubmit={handleResetPassword} className="auth-form">
+            <form onSubmit={handleResetPassword} className="auth-form" autoComplete="off">
               <label>
-                New password
-                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={6} />
+                <span className="field-label">New password</span>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                />
               </label>
               <label>
-                Confirm password
-                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required minLength={6} />
+                <span className="field-label">Confirm password</span>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  autoComplete="new-password"
+                />
               </label>
               <button type="submit" className="btn-primary" disabled={loading}>
                 {loading ? 'Updating...' : 'Update password'}
