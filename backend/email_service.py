@@ -265,14 +265,30 @@ def _send_via_brevo_api(
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         logger.error("Brevo API error %s for %s: %s", exc.code, to_email, detail)
+        detail_lower = detail.lower()
         if exc.code == 401:
+            if "ip" in detail_lower and ("authoriz" in detail_lower or "recogni" in detail_lower):
+                raise EmailDeliveryError(
+                    "Brevo blocked Render's IP. Go to Brevo → Settings → Security → "
+                    "Authorized IPs → Deactivate blocking for API keys, then try again."
+                ) from exc
+            if "key not found" in detail_lower:
+                raise EmailDeliveryError(
+                    "Brevo API key not recognized. Regenerate at Brevo → SMTP & API → "
+                    "API Keys & MCP, paste fresh xkeysib key into BREVO_API_KEY on Render."
+                ) from exc
             raise EmailDeliveryError(
-                "Invalid Brevo API key. Use an API key (xkeysib-...), not an SMTP key (xsmtpsib-...). "
-                "Create one at Brevo → SMTP & API → API keys."
+                "Brevo rejected the API key. Check Brevo → Security → Authorized IPs "
+                "(deactivate blocking) and regenerate the API key if needed."
             ) from exc
         if exc.code == 403:
+            if "sender" in detail_lower or "from" in detail_lower:
+                raise EmailDeliveryError(
+                    "Sender not verified. In Brevo go to Senders & IP → Senders and "
+                    f"verify {SMTP_FROM_EMAIL}, then try again."
+                ) from exc
             raise EmailDeliveryError(
-                "Brevo rejected the sender email. Verify SMTP_FROM_EMAIL in Brevo → Senders."
+                "Brevo rejected the request. Check API key permissions and sender verification."
             ) from exc
         raise EmailDeliveryError("Could not send verification email. Please try again.") from exc
     except urllib.error.URLError as exc:
