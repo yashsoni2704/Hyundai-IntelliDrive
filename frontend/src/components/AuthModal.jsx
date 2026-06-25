@@ -21,46 +21,22 @@ const VIEWS = {
 }
 
 function OtpField({ otp, setOtp, label = 'Verification code' }) {
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = async () => {
-    if (!otp) return
-    try {
-      await navigator.clipboard.writeText(otp)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      /* clipboard blocked */
-    }
-  }
-
   return (
     <label>
       {label}
-      <div className="otp-field-row">
-        <input
-          type="text"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          value={otp}
-          onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-          maxLength={6}
-          required
-          autoFocus
-          className="otp-input"
-          placeholder="000000"
-        />
-        <button
-          type="button"
-          className="btn-secondary otp-copy-btn"
-          onClick={handleCopy}
-          disabled={otp.length !== 6}
-          title="Copy OTP"
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-      <span className="form-hint">Paste the 6-digit code from your email, or use Copy after typing.</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        value={otp}
+        onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+        maxLength={6}
+        required
+        autoFocus
+        className="otp-input"
+        placeholder="000000"
+      />
+      <span className="form-hint">Paste the 6-digit code from your email.</span>
     </label>
   )
 }
