@@ -11,6 +11,7 @@ from email.mime.text import MIMEText
 from config import (
     BREVO_API_KEY,
     DEBUG_MODE,
+    ON_RENDER,
     SMTP_FROM_EMAIL,
     SMTP_HOST,
     SMTP_PASSWORD,
@@ -266,9 +267,14 @@ def _send_via_brevo_api(
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         logger.error("Brevo API error %s for %s: %s", exc.code, to_email, detail)
-        if exc.code in (401, 403):
+        if exc.code == 401:
             raise EmailDeliveryError(
-                "Email service misconfigured. Check BREVO_API_KEY and SMTP_FROM_EMAIL on the server."
+                "Invalid Brevo API key. Use an API key (xkeysib-...), not an SMTP key (xsmtpsib-...). "
+                "Create one at Brevo → SMTP & API → API keys."
+            ) from exc
+        if exc.code == 403:
+            raise EmailDeliveryError(
+                "Brevo rejected the sender email. Verify SMTP_FROM_EMAIL in Brevo → Senders."
             ) from exc
         raise EmailDeliveryError("Could not send verification email. Please try again.") from exc
     except urllib.error.URLError as exc:
@@ -300,6 +306,12 @@ def send_otp_email(to_email: str, otp_code: str, purpose: str) -> None:
         if DEBUG_MODE:
             return
         raise EmailDeliveryError("Email is not configured on the server")
+
+    if ON_RENDER and not _brevo_api_configured():
+        raise EmailDeliveryError(
+            "Server email not set up. Add a Brevo API key (xkeysib-...) as BREVO_API_KEY on Render. "
+            "SMTP keys (xsmtpsib-...) do not work on Render free tier."
+        )
 
     if _brevo_api_configured():
         try:

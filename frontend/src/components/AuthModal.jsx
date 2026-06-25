@@ -166,7 +166,7 @@ export default function AuthModal({ isOpen, onClose, initialView = VIEWS.LOGIN }
       } else if (err.status === 401) {
         setError(err.message || 'Incorrect password.')
       } else if (err.status === 503) {
-        setError('Could not send verification email. Try again in a moment.')
+        setError(err.message || 'Could not send verification email. Try again in a moment.')
       } else {
         setError(err.message || 'Sign in failed. Check your details and try again.')
       }

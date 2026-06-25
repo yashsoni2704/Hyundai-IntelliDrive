@@ -56,19 +56,31 @@ JWT_SECRET = os.getenv("JWT_SECRET", "hyundai-dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))  # 24 hours
 
-# --- Brevo SMTP for OTP emails (https://app.brevo.com/settings/keys/smtp) ---
-SMTP_HOST = os.getenv("SMTP_HOST") or os.getenv("SMTP_SERVER", "")
+# --- Brevo email (https://app.brevo.com/settings/keys) ---
+SMTP_HOST = os.getenv("SMTP_HOST") or os.getenv("SMTP_SERVER", "smtp-relay.brevo.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER") or os.getenv("LOGIN", "")
-SMTP_PASSWORD = (
+_smtp_password = (
     os.getenv("SMTP_PASSWORD", "").replace(" ", "")
     or os.getenv("SMTP_KEY", "").replace(" ", "")
 )
+_brevo_raw = os.getenv("BREVO_API_KEY", "").strip()
+
+# xsmtpsib- = SMTP key (local only). xkeysib- = API key (required on Render free).
+if _brevo_raw.startswith("xsmtpsib-"):
+    if not _smtp_password or _smtp_password.startswith("your-"):
+        _smtp_password = _brevo_raw
+    BREVO_API_KEY = ""
+elif _brevo_raw.startswith("xkeysib-"):
+    BREVO_API_KEY = _brevo_raw
+else:
+    BREVO_API_KEY = _brevo_raw
+
+SMTP_PASSWORD = _smtp_password
 # Must be a verified sender in Brevo (Senders & IP → Senders)
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "").strip()
-# Brevo HTTP API — works on Render free tier (HTTPS). Get at app.brevo.com → SMTP & API → API keys
-BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"
+ON_RENDER = bool(os.getenv("RENDER"))
 
 # Comma-separated list of allowed frontend origins for CORS
 CORS_ORIGINS = os.getenv(

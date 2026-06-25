@@ -26,7 +26,7 @@ def main() -> None:
     plain = "If you see this, Brevo email delivery works."
     html = "<p>If you see this, <strong>Brevo email delivery works</strong>.</p>"
 
-    print(f"Provider: {email_provider()}  →  {to_email}")
+    print(f"Provider: {email_provider()} -> {to_email}")
 
     try:
         if email_provider() == "brevo_api":
