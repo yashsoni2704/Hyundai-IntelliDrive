@@ -335,7 +335,13 @@ def send_otp_email(to_email: str, otp_code: str, purpose: str) -> None:
         _send_via_smtp(message, to_email)
         logger.info("OTP email sent via SMTP to %s (%s)", to_email, purpose)
     except smtplib.SMTPAuthenticationError as exc:
+        err = str(exc).lower()
         logger.error("Brevo SMTP authentication failed for %s: %s", SMTP_USER, exc)
+        if "unauthorized ip" in err:
+            raise EmailDeliveryError(
+                "Brevo blocked this server IP. In Brevo go to Settings → Security → "
+                "Authorized IPs → Deactivate blocking for API/SMTP, then redeploy."
+            ) from exc
         raise EmailDeliveryError(
             "Email server authentication failed. Check SMTP_USER and SMTP_PASSWORD."
         ) from exc

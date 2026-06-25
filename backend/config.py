@@ -58,7 +58,8 @@ JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))  # 24 hours
 
 # --- Brevo email (https://app.brevo.com/settings/keys) ---
 SMTP_HOST = os.getenv("SMTP_HOST") or os.getenv("SMTP_SERVER", "smtp-relay.brevo.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+_default_smtp_port = "2525" if os.getenv("RENDER") else "587"
+SMTP_PORT = int(os.getenv("SMTP_PORT", _default_smtp_port))
 SMTP_USER = os.getenv("SMTP_USER") or os.getenv("LOGIN", "")
 _smtp_password = (
     os.getenv("SMTP_PASSWORD", "").replace(" ", "")
