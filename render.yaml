@@ -27,3 +27,7 @@ services:
         value: /tmp/sentence_transformers
       - key: DEBUG_MODE
         value: "false"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        value: "Hyundai Knowledge Assistant <onboarding@resend.dev>"

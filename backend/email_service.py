@@ -1,12 +1,11 @@
-"""Send OTP emails via Resend HTTP API or SMTP."""
+"""Send OTP emails via Resend API or SMTP."""
 
-import json
 import logging
 import smtplib
-import urllib.error
-import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+import resend
 
 from config import (
     DEBUG_MODE,
@@ -20,6 +19,9 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+
+if RESEND_API_KEY:
+    resend.api_key = RESEND_API_KEY
 
 
 class EmailDeliveryError(Exception):
@@ -226,40 +228,42 @@ def _send_via_smtp(message: MIMEMultipart, to_email: str) -> None:
         server.sendmail(SMTP_FROM_EMAIL, to_email, message.as_string())
 
 
+def _resend_user_message(exc: Exception) -> str:
+    """Map Resend API errors to actionable messages (logged in full server-side)."""
+    text = str(exc).lower()
+    if "api key" in text or "unauthorized" in text or "authentication" in text:
+        return "Email service misconfigured (invalid API key). Please contact support."
+    if "only send testing emails" in text or "verify a domain" in text:
+        return (
+            "Email can only be sent to the Resend account owner until a domain is verified. "
+            "Use your Resend signup email, or verify a domain at resend.com/domains."
+        )
+    if "domain" in text and ("not verified" in text or "verify" in text):
+        return "Email sender domain is not verified. Please contact support."
+    return "Could not send verification email. Please try again."
+
+
 def _send_via_resend(
     to_email: str, subject: str, plain_body: str, html_body: str
 ) -> None:
-    """Send via Resend REST API (fast, no blocked SMTP ports on cloud hosts)."""
-    payload = json.dumps(
-        {
-            "from": RESEND_FROM_EMAIL,
-            "to": [to_email],
-            "subject": subject,
-            "html": html_body,
-            "text": plain_body,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json",
-            "User-Agent": "hyundai-knowledge-assistant/1.0",
-        },
-        method="POST",
-    )
+    """Send via official Resend Python SDK (works on Render; no SMTP ports needed)."""
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            if response.status >= 400:
-                raise EmailDeliveryError("Resend rejected the email request")
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        logger.error("Resend API error %s: %s", exc.code, body)
-        raise EmailDeliveryError("Could not send verification email. Please try again.") from exc
-    except urllib.error.URLError as exc:
-        logger.error("Resend API unreachable: %s", exc)
-        raise EmailDeliveryError("Could not send verification email. Please try again.") from exc
+        result = resend.Emails.send(
+            {
+                "from": RESEND_FROM_EMAIL,
+                "to": [to_email],
+                "subject": subject,
+                "html": html_body,
+                "text": plain_body,
+            }
+        )
+        logger.info("Resend accepted email to %s (id=%s)", to_email, result.get("id"))
+    except resend.exceptions.ValidationError as exc:
+        logger.error("Resend validation error for %s: %s", to_email, exc)
+        raise EmailDeliveryError(_resend_user_message(exc)) from exc
+    except resend.exceptions.ResendError as exc:
+        logger.error("Resend API error for %s: %s", to_email, exc)
+        raise EmailDeliveryError(_resend_user_message(exc)) from exc
 
 
 def send_otp_email(to_email: str, otp_code: str, purpose: str) -> None:
