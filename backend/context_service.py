@@ -38,6 +38,8 @@ VEHICLE_ALIASES: dict[str, str] = {
     "ioniq5": "ioniq",
     "kona electric": "kona",
     "grand i10 nios": "nios",
+    "grandi10": "grand i10",
+    "grandi-10": "grand i10",
     "i 20": "i20",
     "i-20": "i20",
 }
@@ -114,12 +116,17 @@ TOPIC_QUERY_TERMS = {
     "milage",
     "kmpl",
     "fuel",
+    "efficiency",
     "seat",
+    "seats",
     "seater",
     "seating",
+    "capacity",
     "compare",
     "comparison",
     "versus",
+    "difference",
+    "between",
     "feature",
     "features",
     "spec",
@@ -131,6 +138,8 @@ TOPIC_QUERY_TERMS = {
     "schedule",
     "test",
     "drive",
+    "range",
+    "many",
 }
 
 GENERIC_AUTO_TERMS = {
@@ -168,28 +177,53 @@ QUERY_STOPWORDS = {
     "a",
     "an",
     "about",
+    "also",
+    "any",
     "are",
+    "at",
+    "be",
+    "by",
     "can",
     "car",
     "cars",
+    "could",
+    "detail",
+    "details",
+    "do",
     "does",
+    "for",
+    "from",
+    "get",
     "give",
+    "have",
+    "help",
     "hyundai",
     "i",
     "in",
+    "info",
+    "information",
     "is",
     "know",
+    "like",
     "me",
+    "more",
+    "my",
+    "need",
     "of",
+    "on",
+    "or",
     "please",
     "show",
+    "some",
     "tell",
     "the",
     "to",
     "want",
     "what",
     "when",
+    "where",
     "which",
+    "who",
     "how",
     "many",
     "much",
@@ -198,6 +232,9 @@ QUERY_STOPWORDS = {
     "with",
     "it",
     "its",
+    "you",
+    "your",
+    "would",
 }
 
 
@@ -229,6 +266,13 @@ def get_known_hyundai_terms() -> frozenset[str]:
     return _KNOWN_HYUNDAI_TERMS
 
 
+def _model_in_text(model: str, text: str) -> bool:
+    """Match a model name with word boundaries — avoids 'venue' inside 'avenue'."""
+    if " " in model:
+        return model in text
+    return bool(re.search(rf"(?<![a-z0-9]){re.escape(model)}(?![a-z0-9])", text))
+
+
 def is_our_hyundai_model(term: str) -> bool:
     """True when a token matches a Hyundai model in our database."""
     token = term.lower().strip()
@@ -243,11 +287,15 @@ def is_our_hyundai_model(term: str) -> bool:
         if match:
             return True
     for model in VEHICLE_MODELS:
-        if len(token) >= 3 and len(model) >= 3 and (token in model or model in token):
+        if len(token) >= 4 and len(model) >= 4 and (token in model or model in token):
+            return True
+        if _model_in_text(model, token) or _model_in_text(token, model):
             return True
     for alias in VEHICLE_ALIASES:
         alias_l = alias.lower()
-        if len(token) >= 3 and len(alias_l) >= 3 and (token in alias_l or alias_l in token):
+        if token == alias_l or token == VEHICLE_ALIASES[alias]:
+            return True
+        if len(token) >= 4 and len(alias_l) >= 4 and (token in alias_l or alias_l in token):
             return True
     return False
 
@@ -276,7 +324,8 @@ def _is_competitor_token(token: str) -> bool:
         return True
     if normalized in COMPETITOR_SPELLING_FIXES:
         return True
-    if len(normalized) >= 3:
+    # Short/common words (e.g. "for") must not fuzzy-match brands like "ford".
+    if len(normalized) >= 5:
         if get_close_matches(normalized, list(COMPETITOR_BRANDS), n=1, cutoff=0.84):
             return True
     return False
@@ -313,6 +362,10 @@ def search_result_matches_query(query: str, answer: str) -> bool:
     """
     if mentions_unknown_vehicle(query):
         return False
+    vehicle = detect_vehicle(query)
+    answer_lower = answer.lower()
+    if vehicle and vehicle.lower() in answer_lower:
+        return True
     entity_terms = query_entity_terms(query)
     if not entity_terms:
         return True
@@ -327,10 +380,13 @@ def mentions_unknown_vehicle(query: str) -> bool:
     """
     if mentions_competitor_brand(query):
         return True
-    entity_terms = query_entity_terms(query)
-    if not entity_terms:
+    unknown = unknown_vehicle_terms(query)
+    if not unknown:
         return False
-    return any(not is_our_hyundai_model(term) for term in entity_terms)
+    # A valid Hyundai model is present — only reject when another car-like name appears.
+    if detect_vehicle(query):
+        return bool(unknown)
+    return bool(unknown)
 
 
 def is_low_signal_query(query: str) -> bool:
@@ -353,6 +409,8 @@ def is_low_signal_query(query: str) -> bool:
         return True
     if re.fullmatch(r"(no\s+)?data(\s+not)?\s+found", stripped):
         return True
+    if is_vague_query(stripped) or re.search(r"\b(it|its|it's)\b", stripped):
+        return False
     entity_terms = query_entity_terms(query)
     if entity_terms:
         return False
@@ -480,9 +538,115 @@ def serialize_context(ctx: dict[str, Any]) -> str:
     return json.dumps(ctx)
 
 
+_GLUED_TOPIC_SPLITS: tuple[tuple[str, str], ...] = (
+    ("priceof", "price of"),
+    ("costof", "cost of"),
+    ("mileageof", "mileage of"),
+    ("pricefor", "price for"),
+    ("costfor", "cost for"),
+    ("detailfor", "detail for"),
+    ("detailsfor", "details for"),
+    ("infoon", "info on"),
+    ("aboutthe", "about the"),
+    ("priceforgrand", "price for grand"),
+    ("forgrand", "for grand"),
+    ("pricegrand", "price grand"),
+)
+
+
+def _split_glued_topic_words(text: str) -> str:
+    """Split tokens like 'pricefor' into 'price for'."""
+    result = text.lower()
+    for token in set(re.findall(r"[a-z0-9]+", result)):
+        for glued, expanded in _GLUED_TOPIC_SPLITS:
+            if token == glued:
+                result = result.replace(token, expanded)
+                break
+        else:
+            for prefix in (
+                "price",
+                "cost",
+                "mileage",
+                "detail",
+                "details",
+                "info",
+                "about",
+                "for",
+            ):
+                if token.startswith(prefix) and len(token) > len(prefix):
+                    suffix = token[len(prefix):]
+                    if suffix in {"for", "of", "on", "grand"}:
+                        result = result.replace(token, f"{prefix} {suffix}", 1)
+                        break
+                    if suffix in VEHICLE_MODELS or suffix in VEHICLE_ALIASES:
+                        result = result.replace(token, f"{prefix} {suffix}", 1)
+                        break
+    return re.sub(r"\s+", " ", result).strip()
+
+
+_GLUE_PREFIXES = frozenset({
+    "",
+    "for",
+    "of",
+    "on",
+    "at",
+    "hyundai",
+    "price",
+    "cost",
+    "mileage",
+    "detail",
+    "details",
+    "about",
+    "info",
+    "grand",
+    "the",
+    "my",
+    "new",
+})
+
+
+def _split_model_from_token(token: str, model: str) -> str | None:
+    """Pull a model name out of a glued token only when the glue is intentional."""
+    if model not in token or token == model:
+        return None
+    idx = token.find(model)
+    prefix = token[:idx]
+    suffix = token[idx + len(model) :]
+    if prefix and prefix not in _GLUE_PREFIXES:
+        for glued, _expanded in _GLUED_TOPIC_SPLITS:
+            if prefix.endswith(glued.replace(" ", "")) or prefix == glued.replace(" ", ""):
+                break
+        else:
+            if not any(prefix.endswith(p) for p in ("price", "cost", "mileage", "detail", "for")):
+                return None
+    if suffix and suffix not in {"", "price", "mileage", "cost"}:
+        return None
+    parts = [part for part in (prefix, model, suffix) if part]
+    return " ".join(parts)
+
+
+def _split_glued_vehicle_names(text: str) -> str:
+    """Split tokens like 'forTucson' or 'priceofcreta' into separate words."""
+    result = text.lower()
+    models_and_aliases = sorted(
+        {*VEHICLE_MODELS, *VEHICLE_ALIASES.keys()},
+        key=len,
+        reverse=True,
+    )
+    for model in models_and_aliases:
+        for match in re.finditer(r"[a-z0-9]+", result):
+            token = match.group()
+            split_token = _split_model_from_token(token, model)
+            if split_token:
+                result = result.replace(token, split_token, 1)
+    result = _split_glued_topic_words(result)
+    return re.sub(r"\s+", " ", result).strip()
+
+
 def normalize_message(text: str) -> str:
     """Fix common typos and normalize vehicle aliases before search."""
     lower = text.lower().strip()
+    lower = _split_glued_vehicle_names(lower)
     for alias, canonical in sorted(VEHICLE_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
         lower = lower.replace(alias, canonical)
     tokens = re.findall(r"[a-z0-9]+", lower)
@@ -497,11 +661,7 @@ def normalize_message(text: str) -> str:
         if _is_competitor_token(token):
             fixed_tokens.append(token)
             continue
-        match = get_close_matches(token, VEHICLE_MODELS, n=1, cutoff=0.82)
-        if match and len(token) >= 4:
-            fixed_tokens.append(match[0])
-        else:
-            fixed_tokens.append(token)
+        fixed_tokens.append(token)
     if not fixed_tokens:
         return text.strip()
   # Preserve original casing loosely by rebuilding from fixed tokens
@@ -511,15 +671,17 @@ def normalize_message(text: str) -> str:
 def detect_vehicle(text: str) -> str:
     lower = normalize_message(text).lower()
     for alias, canonical in sorted(VEHICLE_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
-        if alias in lower:
+        if _model_in_text(alias, lower):
             return _display_name(canonical)
     for model in sorted(VEHICLE_MODELS, key=len, reverse=True):
-        if model in lower:
+        if _model_in_text(model, lower):
             return _display_name(model)
     return ""
 
 
 def _display_name(model: str) -> str:
+    if model == "i20":
+        return "i20"
     if model == "grand i10":
         return "Grand I10"
     if model == "nios":
@@ -625,21 +787,24 @@ def prepare_clarification_context(ctx: dict[str, Any], message: str) -> dict[str
 
 
 def detect_topic(text: str) -> str:
-    lower = text.lower()
-    if any(k in lower for k in ("price", "cost", "lakh", "rupee")):
+    lower = normalize_message(text).lower()
+    if any(k in lower for k in ("price", "cost", "lakh", "rupee", "how much")):
         return "price"
     if any(k in lower for k in ("mileage", "milage", "kmpl", "km/l", "fuel efficiency")):
         return "mileage"
-    if any(k in lower for k in ("seat", "seater", "seating")):
+    if any(k in lower for k in ("seat", "seater", "seating", "how many seats", "seating capacity")):
         return "seats"
-    if any(k in lower for k in ("feature", "specification", "specs")):
+    if any(
+        k in lower
+        for k in ("feature", "specification", "specs", "detail", "details", "information")
+    ):
         return "features"
     # Booking intent only when clearly about scheduling, not substring noise
     if re.search(r"\b(book|booking)\b", lower) and re.search(
         r"\b(slot|slots|timing|timings|schedule|appointment|test drive)\b", lower
     ):
         return "booking"
-    if any(k in lower for k in ("compare", "vs", "versus")):
+    if any(k in lower for k in ("compare", "vs", "versus", "difference between")):
         return "compare"
     if any(k in lower for k in ("warranty", "service")):
         return "service"
@@ -676,7 +841,7 @@ def _extract_vehicles_from_text(text: str) -> list[str]:
     lower = normalize_message(text).lower()
     found: list[str] = []
     for model in sorted(VEHICLE_MODELS, key=len, reverse=True):
-        if model in lower:
+        if _model_in_text(model, lower):
             name = _display_name(model)
             if name not in found:
                 found.append(name)
@@ -702,7 +867,7 @@ def _compare_search_query(message: str, ctx: dict[str, Any]) -> str:
         vehicles.insert(0, last)
 
     for model in VEHICLE_MODELS:
-        if model in lower:
+        if _model_in_text(model, lower):
             name = _display_name(model)
             if name not in vehicles:
                 vehicles.append(name)
@@ -710,15 +875,15 @@ def _compare_search_query(message: str, ctx: dict[str, Any]) -> str:
     if len(vehicles) >= 2:
         return f"Compare Hyundai {vehicles[0]} and {vehicles[1]}"
     if len(vehicles) == 1:
-        if "verna" in lower and vehicles[0] != "Verna":
+        if _model_in_text("verna", lower) and vehicles[0] != "Verna":
             return f"Compare Hyundai {vehicles[0]} and Verna"
-        if "venue" in lower and vehicles[0] != "Venue":
+        if _model_in_text("venue", lower) and vehicles[0] != "Venue":
             return f"Compare Hyundai {vehicles[0]} and Venue"
-        if "creta" in lower and vehicles[0] != "Creta":
+        if _model_in_text("creta", lower) and vehicles[0] != "Creta":
             return f"Compare Hyundai {vehicles[0]} and Creta"
-        if "alcazar" in lower and vehicles[0] != "Alcazar":
+        if _model_in_text("alcazar", lower) and vehicles[0] != "Alcazar":
             return f"Compare Hyundai {vehicles[0]} and Alcazar"
-        if "tucson" in lower and vehicles[0] != "Tucson":
+        if _model_in_text("tucson", lower) and vehicles[0] != "Tucson":
             return f"Compare Hyundai {vehicles[0]} and Tucson"
     return message
 
@@ -732,7 +897,9 @@ def enrich_search_query(message: str, ctx: dict[str, Any]) -> str:
     if vehicle:
         if detect_topic(message) == "compare":
             return _compare_search_query(message, ctx)
-        if "tell me about" in lower:
+        if "tell me about" in lower or re.search(
+            r"\b(detail|details|more\s+info|more\s+information)\b", lower
+        ):
             return f"Tell me about Hyundai {vehicle}"
         if re.match(r"^[\w\s]+\?$", message.strip()) and len(lower.split()) <= 3:
             return f"Tell me about Hyundai {vehicle}"
@@ -795,7 +962,7 @@ def resolve_query(message: str, ctx: dict[str, Any]) -> str:
     topic = ctx.get("last_topic") or ""
     if topic and topic != "booking":
         return _topic_query(vehicle, topic)
-    if "tell me about" in lower or "about my" in lower or "my car" in lower:
+    if "tell me about" in lower or "about my" in lower or "my car" in lower or "what about it" in lower:
         return f"Tell me about Hyundai {vehicle}"
     if re.search(r"\b(it|its|it's)\b", lower):
         return enrich_search_query(f"Hyundai {vehicle} {message}", ctx)

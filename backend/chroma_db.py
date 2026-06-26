@@ -34,8 +34,10 @@ from data_loader import (
     compute_excel_hash,
 )
 from context_service import (
+    QUERY_STOPWORDS,
     TOPIC_QUERY_TERMS,
     VEHICLE_MODELS,
+    _model_in_text,
     detect_topic,
     detect_vehicle,
     mentions_unknown_vehicle,
@@ -49,45 +51,13 @@ from embeddings import embed_texts, embed_query
 logger = logging.getLogger(__name__)
 
 NO_DATA_MESSAGE = "Sorry, no data found."
-SEARCH_STOPWORDS = {
-    "a",
-    "an",
-    "about",
-    "are",
-    "can",
-    "car",
-    "cars",
-    "does",
-    "give",
-    "hyundai",
-    "i",
-    "in",
-    "is",
-    "know",
-    "me",
-    "of",
-    "please",
-    "show",
-    "tell",
-    "the",
-    "to",
-    "want",
-    "what",
-    "when",
-    "which",
-    "how",
-    "many",
-    "much",
-    "this",
-    "that",
-    "with",
-}
+SEARCH_STOPWORDS = QUERY_STOPWORDS
 TOPIC_SIGNALS: dict[str, list[str]] = {
     "price": ["price", "cost", "lakh", "rupee", "starting"],
     "mileage": ["mileage", "kmpl", "km/l", "fuel efficiency", "fuel"],
     "seats": ["seat", "seater", "seating", "capacity"],
     "compare": ["compare", "comparison", "versus", " vs "],
-    "features": ["feature", "specification", "spec"],
+    "features": ["feature", "specification", "spec", "detail", "details", "about"],
     "booking": ["test drive", "book", "booking", "slot", "schedule"],
     "service": ["warranty", "service"],
 }
@@ -136,11 +106,14 @@ class FAQVectorStore:
         return mentions_unknown_vehicle(query)
 
     def _faq_matches_distinctive_terms(
-        self, entity_terms: set[str], question: str, answer: str
+        self, entity_terms: set[str], question: str, answer: str, query: str = ""
     ) -> bool:
         if not entity_terms:
             return True
         blob = f"{question} {answer}".lower()
+        query_vehicles = self._extract_vehicles(query) if query else []
+        if query_vehicles and all(v.lower() in blob for v in query_vehicles):
+            return True
         return all(term in blob for term in entity_terms)
 
     @property
@@ -249,7 +222,7 @@ class FAQVectorStore:
         lower = normalized.lower()
         found: list[str] = []
         for model in sorted(VEHICLE_MODELS, key=len, reverse=True):
-            if model in lower:
+            if _model_in_text(model, lower):
                 name = detect_vehicle(model)
                 if name and name not in found:
                     found.append(name)
@@ -292,7 +265,7 @@ class FAQVectorStore:
             question = meta.get("question", results["documents"][0][i])
             answer = meta.get("answer", "")
 
-            if not self._faq_matches_distinctive_terms(entity_terms, question, answer):
+            if not self._faq_matches_distinctive_terms(entity_terms, question, answer, query):
                 continue
             if not self._topic_matches(query_topic, question, answer):
                 continue
@@ -394,7 +367,7 @@ class FAQVectorStore:
             answer = (metadata or {}).get("answer") or ""
             question_lower = question.lower()
 
-            if not self._faq_matches_distinctive_terms(entity_terms, question, answer):
+            if not self._faq_matches_distinctive_terms(entity_terms, question, answer, query):
                 continue
 
             if query_topic and not self._topic_matches(query_topic, question, answer):
