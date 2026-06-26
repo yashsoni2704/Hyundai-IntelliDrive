@@ -153,6 +153,21 @@ COMPARE_FAQS: list[tuple[str, str, str]] = [
         "Grand i10 Nios is the newer hatchback with updated styling and features, while Grand i10 is the earlier generation focused on practicality. Nios is generally preferred for latest tech and design.",
     ),
     (
+        "Creta",
+        "Verna",
+        "Creta is a compact SUV with higher ground clearance and SUV styling, while Verna is a sedan with lower running costs and sedan comfort. Choose Creta for SUV road presence; Verna for sedan ride and boot space.",
+    ),
+    (
+        "Exter",
+        "Verna",
+        "Exter is a compact SUV with higher ground clearance and outdoor styling, while Verna is a sedan with more rear-seat comfort for highway travel. Choose based on SUV vs sedan preference.",
+    ),
+    (
+        "Exter",
+        "Tucson",
+        "Exter is an affordable compact SUV for city use, while Tucson is a larger premium SUV with more power and features. Tucson suits buyers wanting a premium experience; Exter suits budget-focused SUV buyers.",
+    ),
+    (
         "Ioniq",
         "Kona",
         "Ioniq 5 is a larger premium EV with longer range and ultra-fast charging, while Kona Electric is a compact EV with lower price. Ioniq 5 suits premium EV buyers; Kona suits city-focused EV users.",

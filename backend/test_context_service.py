@@ -156,6 +156,36 @@ def test_what_about_it_uses_session_vehicle() -> None:
     assert "Verna" in resolved
 
 
+def test_and_verna_continuation_after_price() -> None:
+    ctx = default_context()
+    ctx["last_vehicle"] = "Exter"
+    ctx["last_topic"] = "price"
+    assert not needs_clarification("and verna ?", ctx)
+    resolved = resolve_query("and verna ?", ctx)
+    assert "Verna" in resolved
+    assert "price" in resolved.lower()
+
+
+def test_ok_compare_not_rejected() -> None:
+    assert not mentions_unknown_vehicle("ok compare creta with verna")
+    resolved = resolve_query("ok compare creta with verna", default_context())
+    assert "Creta" in resolved and "Verna" in resolved
+
+
+def test_i20_details_not_rejected() -> None:
+    assert not mentions_unknown_vehicle("is there any details for i20 ?")
+    resolved = resolve_query("is there any details for i20 ?", default_context())
+    assert "i20" in resolved
+
+
+def test_combined_about_and_compare_resolves_to_compare() -> None:
+    resolved = resolve_query(
+        "tell me about exter and compare it with verna", default_context()
+    )
+    assert "Compare" in resolved
+    assert "Exter" in resolved and "Verna" in resolved
+
+
 def test_more_followup_rotates_topics_not_repeat_about() -> None:
     """After 'about', 'tell me more' must return price/mileage — not the same about FAQ."""
     ctx = default_context()

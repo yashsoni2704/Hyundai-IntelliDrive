@@ -46,6 +46,11 @@ VEHICLE_ALIASES: dict[str, str] = {
 
 NOT_OUR_CAR_MESSAGE = "This car is not in our database."
 
+NO_DATA_MESSAGE = (
+    "I couldn't find an exact match in our FAQ. Try asking about a Hyundai model — "
+    "for example: price of Creta, mileage of Venue, or compare Creta and Venue."
+)
+
 CONVERSATIONAL_EXACT = frozenset({
     "ok",
     "okk",
@@ -262,6 +267,7 @@ QUERY_STOPWORDS = {
     "about",
     "also",
     "any",
+    "and",
     "are",
     "at",
     "be",
@@ -297,6 +303,12 @@ QUERY_STOPWORDS = {
     "or",
     "please",
     "show",
+    "ok",
+    "okay",
+    "there",
+    "their",
+    "these",
+    "those",
     "some",
     "tell",
     "the",
@@ -545,13 +557,64 @@ def mentions_unknown_vehicle(query: str) -> bool:
         return False
     if mentions_competitor_brand(query):
         return True
+    if detect_vehicle(query):
+        # Hyundai model present — ignore filler tokens like "ok", "there".
+        unknown = [
+            t
+            for t in unknown_vehicle_terms(query)
+            if t not in CONVERSATIONAL_TOKENS and t not in QUERY_STOPWORDS
+        ]
+        return bool(unknown)
     unknown = unknown_vehicle_terms(query)
     if not unknown:
         return False
-    # A valid Hyundai model is present — only reject when another car-like name appears.
-    if detect_vehicle(query):
-        return bool(unknown)
     return bool(unknown)
+
+
+def friendly_no_data_message(query: str, ctx: dict[str, Any] | None = None) -> str:
+    """Helpful message when FAQ search misses — keeps the conversation going."""
+    ctx = ctx or {}
+    vehicle = detect_vehicle(query) or ctx.get("last_vehicle") or ""
+    topic = detect_topic(query)
+    if topic == "compare":
+        vehicles = _extract_vehicles_from_text(query)
+        if len(vehicles) >= 2:
+            return (
+                f"I don't have a side-by-side comparison for {vehicles[0]} and {vehicles[1]} "
+                "in our FAQ yet. You can ask about each model separately — for example, "
+                f"price or mileage of Hyundai {vehicles[0]} or {vehicles[1]}."
+            )
+    if vehicle:
+        return (
+            f"I couldn't find that specific detail about Hyundai {vehicle} in our FAQ. "
+            "Try asking about its price, mileage, seating capacity, or features."
+        )
+    return NO_DATA_MESSAGE
+
+
+def flip_compare_query(query: str) -> str | None:
+    """Swap vehicle order: Compare Hyundai A and B -> Compare Hyundai B and A."""
+    match = re.match(r"Compare Hyundai (.+?) and (.+?)\s*\??$", query.strip(), re.I)
+    if not match:
+        return None
+    return f"Compare Hyundai {match.group(2).strip()} and {match.group(1).strip()}"
+
+
+def _is_topic_continuation(query: str, ctx: dict[str, Any]) -> bool:
+    """True for 'and verna?' after a price question — reuse last topic."""
+    normalized = normalize_message(query).lower().strip()
+    vehicle = detect_vehicle(query)
+    last_topic = ctx.get("last_topic") or ""
+    if not vehicle or not last_topic or last_topic == "booking":
+        return False
+    if detect_topic(query) or _is_more_info_followup(query) or is_conversational_query(query):
+        return False
+    tokens = [
+        t
+        for t in re.findall(r"[a-z0-9]+", normalized)
+        if t not in QUERY_STOPWORDS and t not in TOPIC_QUERY_TERMS
+    ]
+    return len(tokens) == 1 and is_our_hyundai_model(tokens[0])
 
 
 def is_low_signal_query(query: str) -> bool:
@@ -861,6 +924,7 @@ def _split_glued_vehicle_names(text: str) -> str:
 def normalize_message(text: str) -> str:
     """Fix common typos and normalize vehicle aliases before search."""
     lower = text.lower().strip()
+    lower = re.sub(r"^(ok+|okay|yeah|yes|sure|alright|well)[,!\s]+", "", lower).strip()
     lower = re.sub(r"'s\b", " is", lower)
     lower = re.sub(r"'re\b", " are", lower)
     lower = re.sub(r"'ll\b", " will", lower)
@@ -916,6 +980,8 @@ def _has_about_intent(text: str) -> bool:
     if _is_more_info_followup(text):
         return False
     lower = normalize_message(text).lower()
+    if re.search(r"\b(compare|versus|vs|difference between)\b", lower):
+        return False
     if any(re.search(pattern, lower) for pattern in ABOUT_INTENT_PATTERNS):
         return True
   # Short forms: "about creta", "about hyundai creta"
@@ -1009,6 +1075,9 @@ def needs_clarification(message: str, ctx: dict[str, Any] | None = None) -> bool
     if vehicle and _has_about_intent(normalized):
         return False
 
+    if vehicle and ctx.get("last_topic") and _is_topic_continuation(normalized, ctx):
+        return False
+
     if _is_vehicle_only_query(normalized) and not pending_topic:
         return True
 
@@ -1074,6 +1143,8 @@ def detect_topic(text: str) -> str:
     lower = normalize_message(text).lower()
     if _is_more_info_followup(text):
         return ""
+    if any(k in lower for k in ("compare", "vs", "versus", "difference between")):
+        return "compare"
     if any(k in lower for k in ("price", "cost", "lakh", "rupee", "how much")):
         return "price"
     if any(k in lower for k in ("mileage", "milage", "kmpl", "km/l", "fuel efficiency")):
@@ -1092,8 +1163,6 @@ def detect_topic(text: str) -> str:
         r"\b(slot|slots|timing|timings|schedule|appointment|test drive)\b", lower
     ):
         return "booking"
-    if any(k in lower for k in ("compare", "vs", "versus", "difference between")):
-        return "compare"
     if any(k in lower for k in ("warranty", "service")):
         return "service"
     return ""
@@ -1127,13 +1196,23 @@ def _topic_query(vehicle: str, topic: str) -> str:
 
 
 def _extract_vehicles_from_text(text: str) -> list[str]:
+    """Extract Hyundai models in the order they appear in the user's message."""
     lower = normalize_message(text).lower()
+    positions: list[tuple[int, str]] = []
+    models_and_aliases = sorted(
+        {*VEHICLE_MODELS, *VEHICLE_ALIASES.keys()},
+        key=len,
+        reverse=True,
+    )
+    for model in models_and_aliases:
+        canonical = VEHICLE_ALIASES.get(model, model)
+        for match in re.finditer(rf"(?<![a-z0-9]){re.escape(model)}(?![a-z0-9])", lower):
+            positions.append((match.start(), _display_name(canonical)))
+    positions.sort(key=lambda item: item[0])
     found: list[str] = []
-    for model in sorted(VEHICLE_MODELS, key=len, reverse=True):
-        if _model_in_text(model, lower):
-            name = _display_name(model)
-            if name not in found:
-                found.append(name)
+    for _, name in positions:
+        if name not in found:
+            found.append(name)
     return found
 
 
@@ -1154,12 +1233,6 @@ def _compare_search_query(message: str, ctx: dict[str, Any]) -> str:
 
     if last and last not in vehicles and (vague_ref or (has_partner and len(vehicles) == 1)):
         vehicles.insert(0, last)
-
-    for model in VEHICLE_MODELS:
-        if _model_in_text(model, lower):
-            name = _display_name(model)
-            if name not in vehicles:
-                vehicles.append(name)
 
     if len(vehicles) >= 2:
         return f"Compare Hyundai {vehicles[0]} and {vehicles[1]}"
@@ -1219,6 +1292,14 @@ def resolve_query(message: str, ctx: dict[str, Any]) -> str:
         vehicle = detect_vehicle(message)
         ctx["pending_topic"] = ""
         return _topic_query(vehicle, pending_topic)
+
+    if _is_topic_continuation(message, ctx):
+        vehicle = detect_vehicle(message)
+        return _topic_query(vehicle, ctx.get("last_topic") or "")
+
+    if re.search(r"\b(compare|versus|vs|difference between)\b", lower):
+        if vehicle or ctx.get("last_vehicle"):
+            return _compare_search_query(message, ctx)
 
     if _is_more_info_followup(message) and vehicle:
         return _topic_query(vehicle, _next_detail_topic(ctx))

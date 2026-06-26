@@ -286,6 +286,34 @@ def main() -> int:
         if not is_conversational_query(q):
             failures.append(f"  {q!r} -> should be conversational")
 
+    # Compare queries from screenshots
+    print("\n--- Compare query resolution ---")
+    compare_cases = [
+        ("compare exter with verna", "Exter", "Verna"),
+        ("ok compare creta with verna", "Creta", "Verna"),
+        ("compare exter with tucson", "Exter", "Tucson"),
+        ("compare it with verna", "Exter", "Verna"),
+    ]
+    cctx = default_context()
+    cctx["last_vehicle"] = "Exter"
+    for q, a, b in compare_cases:
+        c = cctx if q == "compare it with verna" else default_context()
+        if mentions_unknown_vehicle(q):
+            failures.append(f"  {q!r} -> wrongly rejected compare")
+        resolved = resolve_query(q, c)
+        if a not in resolved or b not in resolved:
+            failures.append(f"  {q!r} -> bad resolve {resolved!r}")
+
+    print("\n--- Topic continuation (and verna?) ---")
+    cont = default_context()
+    cont["last_vehicle"] = "Exter"
+    cont["last_topic"] = "price"
+    if needs_clarification("and verna ?", cont):
+        failures.append("  'and verna ?' -> should not clarify")
+    r = resolve_query("and verna ?", cont)
+    if "price" not in r.lower() or "Verna" not in r:
+        failures.append(f"  'and verna ?' -> {r!r}")
+
     print(f"\n{'='*60}")
     if failures:
         print(f"FAILURES: {len(failures)}")

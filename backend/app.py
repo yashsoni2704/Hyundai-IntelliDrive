@@ -40,7 +40,10 @@ from context_service import (
     coerce_context,
     conversational_response,
     default_context,
+    detect_vehicle,
     enrich_search_query,
+    flip_compare_query,
+    friendly_no_data_message,
     is_conversational_query,
     is_low_signal_query,
     mentions_unknown_vehicle,
@@ -289,7 +292,9 @@ async def chat(
         # Reject non-Hyundai cars BEFORE context expansion (prevents "tata" -> Creta bug)
         if mentions_unknown_vehicle(original):
             answer = unknown_vehicle_message(original)
-            session_ctx = default_context()
+            # Keep session context when user was chatting about a valid Hyundai model
+            if not detect_vehicle(original):
+                session_ctx = default_context()
             response = ChatResponse(
                 answer=answer,
                 found=False,
@@ -429,6 +434,12 @@ async def chat(
                 result = vector_store.search(alt)
                 if result["found"]:
                     message = alt
+            if not result["found"]:
+                flipped = flip_compare_query(message)
+                if flipped and flipped != message:
+                    result = vector_store.search(flipped)
+                    if result["found"]:
+                        message = flipped
 
         # Final guard: never return a Hyundai FAQ when the user asked about another car.
         if result["found"] and not search_result_matches_query(original, result["answer"]):
@@ -438,12 +449,20 @@ async def chat(
                     "found": False,
                 }
             else:
-                result = {"answer": "Sorry, no data found.", "found": False}
+                result = {
+                    "answer": friendly_no_data_message(original, session_ctx),
+                    "found": False,
+                }
         elif result["found"] and (
             mentions_unknown_vehicle(original) or mentions_unknown_vehicle(message)
         ):
             result = {
                 "answer": unknown_vehicle_message(original),
+                "found": False,
+            }
+        elif not result["found"]:
+            result = {
+                "answer": friendly_no_data_message(original, session_ctx),
                 "found": False,
             }
 

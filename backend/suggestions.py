@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 SUGGESTION_POOL = [
     {"label": "Book a test drive", "action": "book_test_drive", "id": "book_test_drive"},
     {"label": "View my bookings", "action": "my_bookings", "id": "my_bookings"},
@@ -62,9 +64,16 @@ def _suggestion_id(item: dict) -> str:
     return item.get("id") or item.get("label", "")
 
 
+def _keyword_in_text(text: str, keyword: str) -> bool:
+    """Word-boundary match for short keywords — avoids 'verna' inside 'variant'."""
+    if len(keyword) <= 6:
+        return bool(re.search(rf"\b{re.escape(keyword)}\b", text.lower()))
+    return keyword in text.lower()
+
+
 def _text_contains(text: str, keywords: list[str]) -> bool:
     lower = text.lower()
-    return any(k in lower for k in keywords)
+    return any(_keyword_in_text(lower, k) for k in keywords)
 
 
 def _filter_used(items: list[dict], used_ids: set[str]) -> list[dict]:
@@ -134,7 +143,7 @@ def get_follow_up_suggestions(
                 seen_ids.add(sid)
 
     for keywords, items in TOPIC_SUGGESTIONS:
-        if vehicle and keywords == ["creta", "price", "cost", "lakh"] and vehicle != "creta":
+        if vehicle and keywords == ["creta", "price", "cost", "lakh"]:
             continue
         if _text_contains(combined, keywords):
             for item in items:
