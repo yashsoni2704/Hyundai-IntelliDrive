@@ -18,6 +18,7 @@ from context_service import (  # noqa: E402
     mentions_unknown_vehicle,
     needs_clarification,
     normalize_message,
+    is_conversational_query,
     resolve_query,
     unknown_vehicle_terms,
     update_context,
@@ -274,6 +275,16 @@ def main() -> int:
         r = resolve_query("tell me more", dict(c))
         if "price" not in r.lower():
             failures.append(f"  tell me more after {model_key} -> expected price, got {r!r}")
+
+    # Conversational fillers must never be treated as unknown cars
+    print("\n--- Conversational fillers ---")
+    filler_ctx = default_context()
+    filler_ctx["last_vehicle"] = "Creta"
+    for q in ["okkk", "ok", "thanks", "thank you", "cool", "got it", "ty", "thx", "nice", "perfect"]:
+        if mentions_unknown_vehicle(q):
+            failures.append(f"  {q!r} -> wrongly treated as unknown car")
+        if not is_conversational_query(q):
+            failures.append(f"  {q!r} -> should be conversational")
 
     print(f"\n{'='*60}")
     if failures:

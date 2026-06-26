@@ -11,9 +11,11 @@ from context_service import (
     VEHICLE_MODELS,
     _display_name,
     _extract_vehicles_from_text,
+    conversational_response,
     default_context,
     detect_topic,
     detect_vehicle,
+    is_conversational_query,
     mentions_unknown_vehicle,
     needs_clarification,
     normalize_message,
@@ -234,6 +236,31 @@ def test_all_models_tell_me_about_no_clarification(model: str) -> None:
         assert detect_vehicle(query) == display, f"Wrong vehicle for: {query!r}"
         resolved = resolve_query(query, ctx)
         assert display in resolved, f"Resolve missing {display}: {query!r} -> {resolved!r}"
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["okkk", "ok", "thanks", "thank you", "thankyou", "cool", "got it", "nice", "ty", "thx"],
+)
+def test_conversational_not_treated_as_unknown_car(query: str) -> None:
+    assert is_conversational_query(query)
+    assert not mentions_unknown_vehicle(query)
+
+
+def test_conversational_response_keeps_vehicle_context() -> None:
+    ctx = default_context()
+    ctx["last_vehicle"] = "Creta"
+    answer = conversational_response("okkk", ctx)
+    assert "Creta" in answer
+    assert "not in our database" not in answer.lower()
+
+
+def test_thank_you_response() -> None:
+    ctx = default_context()
+    ctx["last_vehicle"] = "Creta"
+    answer = conversational_response("thank you", ctx)
+    assert "welcome" in answer.lower()
+    assert "Creta" in answer
 
 
 @pytest.mark.parametrize("model", VEHICLE_MODELS)

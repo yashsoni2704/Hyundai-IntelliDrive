@@ -46,6 +46,89 @@ VEHICLE_ALIASES: dict[str, str] = {
 
 NOT_OUR_CAR_MESSAGE = "This car is not in our database."
 
+CONVERSATIONAL_EXACT = frozenset({
+    "ok",
+    "okk",
+    "okkk",
+    "okay",
+    "k",
+    "kk",
+    "kkk",
+    "thanks",
+    "thank",
+    "thankyou",
+    "thx",
+    "ty",
+    "cheers",
+    "cool",
+    "nice",
+    "great",
+    "alright",
+    "yep",
+    "yeah",
+    "yup",
+    "ya",
+    "nope",
+    "nah",
+    "sure",
+    "fine",
+    "perfect",
+    "awesome",
+    "wonderful",
+    "hm",
+    "hmm",
+    "hmmm",
+    "bye",
+    "good",
+    "goodbye",
+    "welcome",
+    "gotit",
+    "understood",
+    "roger",
+    "copy",
+})
+
+CONVERSATIONAL_PHRASES = (
+    "thank you",
+    "thanks a lot",
+    "thank u",
+    "got it",
+    "sounds good",
+    "that is fine",
+    "thats fine",
+    "no problem",
+    "noted",
+    "will do",
+    "see you",
+    "take care",
+)
+
+CONVERSATIONAL_TOKENS = CONVERSATIONAL_EXACT | {
+    "you",
+    "u",
+    "a",
+    "lot",
+    "so",
+    "much",
+    "very",
+    "got",
+    "it",
+    "that",
+    "is",
+    "sounds",
+    "good",
+    "no",
+    "problem",
+    "noted",
+    "will",
+    "do",
+    "see",
+    "take",
+    "care",
+    "well",
+    "done",
+}
+
 # Common non-Hyundai brands — we only block the brand name, not every competitor model.
 COMPETITOR_BRANDS = frozenset({
     "tata",
@@ -386,11 +469,80 @@ def search_result_matches_query(query: str, answer: str) -> bool:
     return all(term in blob for term in entity_terms)
 
 
+def _collapse_repeated_chars(text: str) -> str:
+    """okkk -> ok, thankss -> thanks (for filler detection only)."""
+    return re.sub(r"(.)\1+", r"\1", text.strip().lower())
+
+
+def is_conversational_query(query: str) -> bool:
+    """True for thanks, ok, cool, and other chat fillers — not car questions."""
+    stripped = normalize_message(query).strip().lower()
+    if not stripped:
+        return True
+    collapsed = _collapse_repeated_chars(stripped.replace(" ", ""))
+    if stripped in CONVERSATIONAL_EXACT or collapsed in CONVERSATIONAL_EXACT:
+        return True
+    for phrase in CONVERSATIONAL_PHRASES:
+        if stripped == phrase or stripped.startswith(f"{phrase} ") or stripped.endswith(f" {phrase}"):
+            return True
+    if stripped in {"hi", "hello", "hey", "hiya", "howdy"}:
+        return True
+    tokens = [
+        t
+        for t in re.findall(r"[a-z]+", stripped)
+        if t not in QUERY_STOPWORDS and t not in TOPIC_QUERY_TERMS
+    ]
+    if tokens and all(t in CONVERSATIONAL_TOKENS for t in tokens):
+        return True
+    return False
+
+
+def conversational_response(query: str, ctx: dict[str, Any] | None = None) -> str:
+    """Friendly reply for thanks / ok / fillers — keeps the chat flowing naturally."""
+    ctx = ctx or {}
+    vehicle = ctx.get("last_vehicle") or ""
+    lower = normalize_message(query).lower()
+
+    if any(p in lower for p in ("thank", "thx", "ty", "cheers", "appreciate")):
+        if vehicle:
+            return (
+                f"You're welcome! Feel free to ask more about Hyundai {vehicle} — "
+                "price, mileage, seating, or features — or book a test drive."
+            )
+        return (
+            "You're welcome! Feel free to ask me anything about Hyundai cars, "
+            "pricing, mileage, or test drives."
+        )
+
+    if lower.strip() in {"hi", "hello", "hey", "hiya", "howdy"}:
+        if vehicle:
+            return (
+                f"Hello! I can help you with Hyundai {vehicle} — ask about price, "
+                "mileage, features, or book a test drive."
+            )
+        return (
+            "Hello! I'm your Hyundai Knowledge Assistant. Ask me about any Hyundai "
+            "model, pricing, mileage, or test drive booking."
+        )
+
+    if vehicle:
+        return (
+            f"Sure! What else would you like to know about Hyundai {vehicle}? "
+            "You can ask about price, mileage, seating capacity, or features."
+        )
+    return (
+        "I'm here to help! Ask me about any Hyundai model, pricing, mileage, "
+        "comparisons, or test drive booking."
+    )
+
+
 def mentions_unknown_vehicle(query: str) -> bool:
     """
     True when the user names a car that is not in our Hyundai model list.
     Generic questions (e.g. 'what is the price') return False — clarification handles those.
     """
+    if is_conversational_query(query):
+        return False
     if mentions_competitor_brand(query):
         return True
     unknown = unknown_vehicle_terms(query)
@@ -404,6 +556,8 @@ def mentions_unknown_vehicle(query: str) -> bool:
 
 def is_low_signal_query(query: str) -> bool:
     """Gibberish, single-letter, or meta text — must not reuse session context."""
+    if is_conversational_query(query):
+        return False
     stripped = normalize_message(query).strip().lower()
     if len(stripped) < 2:
         return True

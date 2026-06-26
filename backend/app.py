@@ -38,8 +38,10 @@ from routers.admin_router import router as admin_router
 from context_service import (
     clarification_message,
     coerce_context,
+    conversational_response,
     default_context,
     enrich_search_query,
+    is_conversational_query,
     is_low_signal_query,
     mentions_unknown_vehicle,
     needs_clarification,
@@ -259,6 +261,30 @@ async def chat(
             session_ctx = get_session_context(session)
         else:
             session_ctx = coerce_context(request.client_context)
+
+        # Thanks, ok, cool, etc. — friendly reply; keep session context (don't reset to "not in database")
+        if is_conversational_query(original):
+            answer = conversational_response(original, session_ctx)
+            suggestions = get_follow_up_suggestions(
+                original, answer, True, used_ids, session_ctx
+            )
+            response = ChatResponse(
+                answer=answer,
+                found=True,
+                response_type="conversational",
+                suggestions=suggestions,
+                context=session_ctx,
+            )
+            log_chat_interaction(
+                db,
+                query=original,
+                answer=answer,
+                found=True,
+                response_type="conversational",
+                user=current_user,
+                session_id=session_id,
+            )
+            return response
 
         # Reject non-Hyundai cars BEFORE context expansion (prevents "tata" -> Creta bug)
         if mentions_unknown_vehicle(original):
