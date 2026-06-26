@@ -19,6 +19,7 @@ from context_service import (
     normalize_message,
     resolve_query,
     unknown_vehicle_message,
+    update_context,
 )
 
 MODELS = ["creta", "venue", "i20", "verna", "alcazar", "tucson", "ioniq", "kona", "aura", "exter", "grand i10", "nios"]
@@ -151,6 +152,31 @@ def test_what_about_it_uses_session_vehicle() -> None:
     ctx["last_vehicle"] = "Verna"
     resolved = resolve_query("what about it", ctx)
     assert "Verna" in resolved
+
+
+def test_more_followup_rotates_topics_not_repeat_about() -> None:
+    """After 'about', 'tell me more' must return price/mileage — not the same about FAQ."""
+    ctx = default_context()
+    ctx = update_context(
+        ctx,
+        "i want to know about creta",
+        "Hyundai Creta is a popular compact SUV known for bold design.",
+    )
+    assert ctx["last_vehicle"] == "Creta"
+    assert "about" in ctx.get("covered_topics", [])
+
+    r2 = resolve_query("tell more about this", ctx)
+    assert "price" in r2.lower()
+    ctx = update_context(ctx, "tell more about this", "The Hyundai Creta starts at approximately 11 lakh.")
+
+    r3 = resolve_query("tell me more for this car ?", ctx)
+    assert "mileage" in r3.lower()
+    ctx = update_context(ctx, "tell me more for this car ?", "The Hyundai Creta delivers approximately 17.4 km/l.")
+
+    r4 = resolve_query("tell me more", ctx)
+    assert "seat" in r4.lower() or "seating" in r4.lower()
+    assert r2 != "Tell me about Hyundai Creta"
+    assert r3 != r2
 
 
 def test_how_much_detects_price_topic() -> None:

@@ -515,6 +515,24 @@ VAGUE_PHRASES = [
     "i want to know",
 ]
 
+MORE_INFO_PATTERNS: tuple[str, ...] = (
+    r"tell me more",
+    r"tell more",
+    r"more about this",
+    r"more about it",
+    r"more about the",
+    r"more for this",
+    r"more on this",
+    r"anything else",
+    r"what else",
+    r"something more",
+    r"anything more",
+    r"share more",
+    r"^more$",
+)
+
+DETAIL_TOPIC_ORDER: tuple[str, ...] = ("about", "price", "mileage", "seats", "features")
+
 ABOUT_INTENT_PATTERNS: tuple[str, ...] = (
     r"tell me about",
     r"tell me more about",
@@ -551,6 +569,7 @@ def default_context() -> dict[str, Any]:
         "last_topic": "",
         "pending_topic": "",
         "pending_vehicle": "",
+        "covered_topics": [],
         "recent_queries": [],
     }
 
@@ -740,6 +759,8 @@ def _display_name(model: str) -> str:
 
 def _has_about_intent(text: str) -> bool:
     """True when the user wants general information about a car (not just naming it)."""
+    if _is_more_info_followup(text):
+        return False
     lower = normalize_message(text).lower()
     if any(re.search(pattern, lower) for pattern in ABOUT_INTENT_PATTERNS):
         return True
@@ -747,6 +768,52 @@ def _has_about_intent(text: str) -> bool:
     if detect_vehicle(text) and re.search(r"\babout\b", lower):
         return True
     return False
+
+
+def _is_more_info_followup(text: str) -> bool:
+    """True when the user wants additional details on the car already in context."""
+    if detect_vehicle(text):
+        return False
+    lower = normalize_message(text).lower()
+    if any(
+        k in lower
+        for k in ("price", "cost", "mileage", "milage", "seat", "seater", "compare", "book", "booking")
+    ):
+        return False
+    if any(re.search(pattern, lower) for pattern in MORE_INFO_PATTERNS):
+        return True
+    if re.search(r"\bmore\b", lower) and re.search(r"\b(this|it|car)\b", lower):
+        return True
+    return False
+
+
+def _next_detail_topic(ctx: dict[str, Any]) -> str:
+    """Pick the next FAQ topic the user has not seen yet for the current car."""
+    covered = set(ctx.get("covered_topics") or [])
+    last = ctx.get("last_topic") or ""
+    if last:
+        covered.add(last)
+    for topic in DETAIL_TOPIC_ORDER:
+        if topic not in covered:
+            return topic
+    return "features"
+
+
+def infer_topic_from_text(text: str) -> str:
+    """Infer FAQ topic from answer text when the user query was vague."""
+    topic = detect_topic(text)
+    if topic:
+        return topic
+    lower = text.lower()
+    if any(k in lower for k in ("starts at", "ex-showroom", "lakh", "₹")):
+        return "price"
+    if any(k in lower for k in ("km/l", "kmpl", "per charge", "range of up to")):
+        return "mileage"
+    if any(k in lower for k in ("seater", "seat configuration", "-seat")):
+        return "seats"
+    if "compare" in lower:
+        return "compare"
+    return "about"
 
 
 def _is_vehicle_only_query(message: str) -> bool:
@@ -851,6 +918,8 @@ def prepare_clarification_context(ctx: dict[str, Any], message: str) -> dict[str
 
 def detect_topic(text: str) -> str:
     lower = normalize_message(text).lower()
+    if _is_more_info_followup(text):
+        return ""
     if any(k in lower for k in ("price", "cost", "lakh", "rupee", "how much")):
         return "price"
     if any(k in lower for k in ("mileage", "milage", "kmpl", "km/l", "fuel efficiency")):
@@ -997,6 +1066,9 @@ def resolve_query(message: str, ctx: dict[str, Any]) -> str:
         ctx["pending_topic"] = ""
         return _topic_query(vehicle, pending_topic)
 
+    if _is_more_info_followup(message) and vehicle:
+        return _topic_query(vehicle, _next_detail_topic(ctx))
+
     if current_topic == "compare":
         if not vehicle and not ctx.get("last_vehicle"):
             return message
@@ -1025,8 +1097,11 @@ def resolve_query(message: str, ctx: dict[str, Any]) -> str:
     if "price" in lower or "cost" in lower:
         return _topic_query(vehicle, "price")
 
+    if _is_more_info_followup(message):
+        return _topic_query(vehicle, _next_detail_topic(ctx))
+
     topic = ctx.get("last_topic") or ""
-    if topic and topic != "booking":
+    if topic and topic != "booking" and not _is_more_info_followup(message):
         return _topic_query(vehicle, topic)
     if "tell me about" in lower or "about my" in lower or "my car" in lower or "what about it" in lower:
         return f"Tell me about Hyundai {vehicle}"
@@ -1057,13 +1132,19 @@ def update_context(ctx: dict[str, Any], query: str, answer: str) -> dict[str, An
         vehicle = detect_vehicle(answer) or last_vehicle
 
     topic = detect_topic(query)
-    if not topic and not is_vague_query(query):
+    if not topic and (_is_more_info_followup(query) or is_vague_query(query)):
+        topic = infer_topic_from_text(answer)
+    elif not topic and not is_vague_query(query):
         topic = detect_topic(answer)
 
     if vehicle:
         ctx["last_vehicle"] = vehicle
     if topic:
         ctx["last_topic"] = topic
+        covered = list(ctx.get("covered_topics") or [])
+        if topic not in covered:
+            covered.append(topic)
+        ctx["covered_topics"] = covered[-8:]
         if explicit_vehicle and not compare_query:
             ctx["pending_topic"] = ""
 

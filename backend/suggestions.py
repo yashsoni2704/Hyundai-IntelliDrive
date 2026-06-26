@@ -82,6 +82,7 @@ def get_follow_up_suggestions(
     used_ids = set(used_suggestion_ids or [])
     ctx = context or {}
     vehicle = (ctx.get("last_vehicle") or "").lower()
+    covered = set(ctx.get("covered_topics") or [])
     combined = f"{query} {answer}"
     if vehicle and vehicle not in combined.lower():
         combined = f"{combined} {vehicle}"
@@ -89,12 +90,43 @@ def get_follow_up_suggestions(
     seen_ids: set[str] = set()
 
     if vehicle:
-        vehicle_title = vehicle.title()
-        vehicle_items = [
-            {"label": f"Book {vehicle_title} test drive", "action": "book_test_drive", "vehicle": vehicle_title, "id": f"book_{vehicle}"},
-            {"label": f"{vehicle_title} mileage", "action": "chat", "query": f"What is the mileage of Hyundai {vehicle_title}?", "id": f"{vehicle}_mileage"},
-            {"label": f"{vehicle_title} price", "action": "chat", "query": f"What is the price of Hyundai {vehicle_title}?", "id": f"{vehicle}_price"},
-        ]
+        vehicle_title = vehicle.title() if vehicle != "i20" else "i20"
+        vehicle_items = []
+        if "price" not in covered:
+            vehicle_items.append(
+                {
+                    "label": f"{vehicle_title} price",
+                    "action": "chat",
+                    "query": f"What is the price of Hyundai {vehicle_title}?",
+                    "id": f"{vehicle}_price",
+                }
+            )
+        if "mileage" not in covered:
+            vehicle_items.append(
+                {
+                    "label": f"{vehicle_title} mileage",
+                    "action": "chat",
+                    "query": f"What is the mileage of Hyundai {vehicle_title}?",
+                    "id": f"{vehicle}_mileage",
+                }
+            )
+        if "seats" not in covered:
+            vehicle_items.append(
+                {
+                    "label": f"{vehicle_title} seating",
+                    "action": "chat",
+                    "query": f"What is the seating capacity of Hyundai {vehicle_title}?",
+                    "id": f"{vehicle}_seats",
+                }
+            )
+        vehicle_items.append(
+            {
+                "label": f"Book {vehicle_title} test drive",
+                "action": "book_test_drive",
+                "vehicle": vehicle_title,
+                "id": f"book_{vehicle}",
+            }
+        )
         for item in vehicle_items:
             sid = _suggestion_id(item)
             if sid not in seen_ids and sid not in used_ids:
@@ -102,6 +134,8 @@ def get_follow_up_suggestions(
                 seen_ids.add(sid)
 
     for keywords, items in TOPIC_SUGGESTIONS:
+        if vehicle and keywords == ["creta", "price", "cost", "lakh"] and vehicle != "creta":
+            continue
         if _text_contains(combined, keywords):
             for item in items:
                 sid = _suggestion_id(item)

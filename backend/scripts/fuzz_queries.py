@@ -20,6 +20,7 @@ from context_service import (  # noqa: E402
     normalize_message,
     resolve_query,
     unknown_vehicle_terms,
+    update_context,
 )
 from scripts.human_patterns import (  # noqa: E402
     HUMAN_ABOUT_PATTERNS,
@@ -260,6 +261,19 @@ def main() -> int:
     for q in ["i20", "creta", "tucson"]:
         if not needs_clarification(q, ctx):
             failures.append(f"  {q!r} -> bare model should ask clarification")
+
+    # Multi-turn "tell me more" rotation for every model
+    print("\n--- More-info follow-up rotation (all models) ---")
+    for model_key, display in MODELS.items():
+        c = default_context()
+        c = update_context(
+            c,
+            f"tell me about {model_key}",
+            f"Hyundai {display} is a great car.",
+        )
+        r = resolve_query("tell me more", dict(c))
+        if "price" not in r.lower():
+            failures.append(f"  tell me more after {model_key} -> expected price, got {r!r}")
 
     print(f"\n{'='*60}")
     if failures:
