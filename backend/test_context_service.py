@@ -15,6 +15,7 @@ from context_service import (
     detect_topic,
     detect_vehicle,
     mentions_unknown_vehicle,
+    needs_clarification,
     normalize_message,
     resolve_query,
     unknown_vehicle_message,
@@ -166,6 +167,52 @@ def test_compare_phrasing() -> None:
 
 def test_unknown_car_message_constant() -> None:
     assert unknown_vehicle_message("bmw price") == NOT_OUR_CAR_MESSAGE
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "tell me about i20",
+        "Tell me about Hyundai i20",
+        "tell me about creta",
+        "what about verna",
+        "can you tell me about tucson",
+        "i want to know about venue",
+        "wanna know about kona",
+        "could you please tell me about alcazar",
+        "give me info on exter",
+        "how about aura",
+    ],
+)
+def test_about_queries_never_need_clarification(query: str) -> None:
+    ctx = default_context()
+    assert not needs_clarification(query, ctx), f"Should answer directly: {query!r}"
+    resolved = resolve_query(query, ctx)
+    assert detect_vehicle(query) in resolved or "Tell me about" in resolved
+
+
+@pytest.mark.parametrize("model", VEHICLE_MODELS)
+def test_all_models_tell_me_about_no_clarification(model: str) -> None:
+    """Every car in our database must answer 'tell me about X' without a clarification loop."""
+    display = _display_name(model)
+    ctx = default_context()
+    for query in (
+        f"tell me about {model}",
+        f"Tell me about Hyundai {display}",
+        f"can you tell me about {model}",
+        f"what about {model}",
+        f"give me price for {model}",
+        f"more details about {model}",
+    ):
+        assert not needs_clarification(query, ctx), f"Should not clarify: {query!r}"
+        assert detect_vehicle(query) == display, f"Wrong vehicle for: {query!r}"
+        resolved = resolve_query(query, ctx)
+        assert display in resolved, f"Resolve missing {display}: {query!r} -> {resolved!r}"
+
+
+@pytest.mark.parametrize("model", VEHICLE_MODELS)
+def test_bare_model_name_needs_clarification(model: str) -> None:
+    assert needs_clarification(model, default_context())
 
 
 def test_for_does_not_match_ford() -> None:

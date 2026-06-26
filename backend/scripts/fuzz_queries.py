@@ -11,14 +11,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from context_service import (  # noqa: E402
     VEHICLE_MODELS,
     _display_name,
+    default_context,
     detect_topic,
     detect_vehicle,
     mentions_competitor_brand,
     mentions_unknown_vehicle,
+    needs_clarification,
     normalize_message,
     resolve_query,
     unknown_vehicle_terms,
-    default_context,
+)
+from scripts.human_patterns import (  # noqa: E402
+    HUMAN_ABOUT_PATTERNS,
+    HUMAN_CASUAL_PATTERNS,
+    HUMAN_MILEAGE_PATTERNS,
+    HUMAN_PRICE_PATTERNS,
 )
 
 MODELS = {
@@ -112,11 +119,31 @@ def generate_queries() -> list[tuple[str, str]]:
     return pairs
 
 
+def generate_human_queries() -> list[tuple[str, str]]:
+    """Casual / polite / normal human phrasings per model."""
+    pairs: list[tuple[str, str]] = []
+    all_patterns = (
+        HUMAN_ABOUT_PATTERNS
+        + HUMAN_PRICE_PATTERNS
+        + HUMAN_MILEAGE_PATTERNS
+        + HUMAN_CASUAL_PATTERNS
+    )
+    for model_key, display in MODELS.items():
+        short = model_key.replace(" ", "")
+        for tmpl in all_patterns:
+            for m, d in ((model_key, display), (short, display)):
+                try:
+                    pairs.append((tmpl.format(m=m, d=d), display))
+                except KeyError:
+                    pairs.append((tmpl.format(m=m), display))
+    return pairs
+
+
 def main() -> int:
     failures: list[str] = []
     ctx = default_context()
 
-    queries = generate_queries()
+    queries = generate_queries() + generate_human_queries()
     print(f"Testing {len(queries)} Hyundai query variants...")
 
     for query, expected_vehicle in queries:
@@ -208,6 +235,31 @@ def main() -> int:
             failures.append(f"  followup {followup!r} -> {resolved!r} missing {exp_v}")
         if exp_topic_word and exp_topic_word not in resolved.lower():
             failures.append(f"  followup {followup!r} -> {resolved!r} missing topic {exp_topic_word}")
+
+    # About-intent queries must NOT ask for clarification
+    print("\n--- About-intent / human phrasing (no clarification loop) ---")
+    about_must_answer = [
+        "tell me about i20",
+        "Tell me about Hyundai i20",
+        "what about verna",
+        "can you tell me about tucson",
+        "i want to know about venue",
+        "wanna know about kona",
+        "could you please tell me about alcazar",
+    ]
+    for q in about_must_answer:
+        if needs_clarification(q, ctx):
+            failures.append(f"  {q!r} -> should answer directly, not clarify")
+        resolved = resolve_query(q, dict(ctx))
+        vehicle = detect_vehicle(q)
+        if vehicle and vehicle not in resolved and "Tell me about" not in resolved:
+            failures.append(f"  {q!r} -> bad resolve {resolved!r}")
+
+    # Bare model name should still ask what topic user wants
+    print("\n--- Bare model name clarification ---")
+    for q in ["i20", "creta", "tucson"]:
+        if not needs_clarification(q, ctx):
+            failures.append(f"  {q!r} -> bare model should ask clarification")
 
     print(f"\n{'='*60}")
     if failures:

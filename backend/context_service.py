@@ -219,6 +219,19 @@ QUERY_STOPWORDS = {
     "the",
     "to",
     "want",
+    "wanna",
+    "gonna",
+    "gimme",
+    "lemme",
+    "pls",
+    "plz",
+    "hey",
+    "yeah",
+    "share",
+    "explain",
+    "learn",
+    "describe",
+    "deal",
     "what",
     "when",
     "where",
@@ -502,6 +515,35 @@ VAGUE_PHRASES = [
     "i want to know",
 ]
 
+ABOUT_INTENT_PATTERNS: tuple[str, ...] = (
+    r"tell me about",
+    r"tell me more about",
+    r"can you tell me about",
+    r"could you tell me about",
+    r"please tell me about",
+    r"want to know about",
+    r"wanna know about",
+    r"wanted to know about",
+    r"like to know about",
+    r"know about",
+    r"learn about",
+    r"info on",
+    r"info about",
+    r"information on",
+    r"information about",
+    r"what about",
+    r"how about",
+    r"more about",
+    r"details about",
+    r"details on",
+    r"give me info on",
+    r"give me information on",
+    r"i want to know about",
+    r"share about",
+    r"explain about",
+    r"describe",
+)
+
 
 def default_context() -> dict[str, Any]:
     return {
@@ -646,6 +688,11 @@ def _split_glued_vehicle_names(text: str) -> str:
 def normalize_message(text: str) -> str:
     """Fix common typos and normalize vehicle aliases before search."""
     lower = text.lower().strip()
+    lower = re.sub(r"'s\b", " is", lower)
+    lower = re.sub(r"'re\b", " are", lower)
+    lower = re.sub(r"'ll\b", " will", lower)
+    lower = re.sub(r"'ve\b", " have", lower)
+    lower = re.sub(r"'", "", lower)
     lower = _split_glued_vehicle_names(lower)
     for alias, canonical in sorted(VEHICLE_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
         lower = lower.replace(alias, canonical)
@@ -691,8 +738,21 @@ def _display_name(model: str) -> str:
     return model.title()
 
 
+def _has_about_intent(text: str) -> bool:
+    """True when the user wants general information about a car (not just naming it)."""
+    lower = normalize_message(text).lower()
+    if any(re.search(pattern, lower) for pattern in ABOUT_INTENT_PATTERNS):
+        return True
+  # Short forms: "about creta", "about hyundai creta"
+    if detect_vehicle(text) and re.search(r"\babout\b", lower):
+        return True
+    return False
+
+
 def _is_vehicle_only_query(message: str) -> bool:
     normalized = normalize_message(message)
+    if _has_about_intent(normalized):
+        return False
     vehicle = detect_vehicle(normalized)
     if not vehicle:
         return False
@@ -725,10 +785,13 @@ def needs_clarification(message: str, ctx: dict[str, Any] | None = None) -> bool
     if vehicle and topic:
         return False
 
+    if vehicle and _has_about_intent(normalized):
+        return False
+
     if _is_vehicle_only_query(normalized) and not pending_topic:
         return True
 
-    if is_vague_query(normalized) and not last_vehicle:
+    if is_vague_query(normalized) and not last_vehicle and not (vehicle and _has_about_intent(normalized)):
         return True
 
     if topic and not vehicle and not last_vehicle:
@@ -752,7 +815,7 @@ def needs_clarification(message: str, ctx: dict[str, Any] | None = None) -> bool
         "something",
         "anything",
     }
-    if not last_vehicle and len(words) <= 3 and any(w in words for w in vague_words):
+    if not last_vehicle and not vehicle and len(words) <= 3 and any(w in words for w in vague_words):
         return True
     if not last_vehicle and vehicle and len(words) <= 1:
         return True
@@ -779,7 +842,7 @@ def prepare_clarification_context(ctx: dict[str, Any], message: str) -> dict[str
     """Remember what the user wanted so the next reply can be answered."""
     topic = detect_topic(message)
     vehicle = detect_vehicle(message)
-    if vehicle and not topic and _is_vehicle_only_query(message):
+    if vehicle and not topic and _is_vehicle_only_query(message) and not _has_about_intent(message):
         ctx["pending_vehicle"] = vehicle
     elif topic and not vehicle and not ctx.get("last_vehicle"):
         ctx["pending_topic"] = topic
@@ -794,6 +857,8 @@ def detect_topic(text: str) -> str:
         return "mileage"
     if any(k in lower for k in ("seat", "seater", "seating", "how many seats", "seating capacity")):
         return "seats"
+    if detect_vehicle(text) and _has_about_intent(text):
+        return "about"
     if any(
         k in lower
         for k in ("feature", "specification", "specs", "detail", "details", "information")
@@ -813,7 +878,7 @@ def detect_topic(text: str) -> str:
 
 def is_vague_query(text: str) -> bool:
     lower = text.lower().strip()
-    if detect_vehicle(lower) and detect_topic(lower):
+    if detect_vehicle(lower) and (_has_about_intent(lower) or detect_topic(lower)):
         return False
     if any(p in lower for p in VAGUE_PHRASES):
         return True
@@ -832,6 +897,7 @@ def _topic_query(vehicle: str, topic: str) -> str:
         "mileage": f"What is the mileage of Hyundai {vehicle}?",
         "seats": f"What is the seating capacity of Hyundai {vehicle}?",
         "features": f"What are the features of Hyundai {vehicle}?",
+        "about": f"Tell me about Hyundai {vehicle}",
         "booking": f"Can I schedule a test drive for Hyundai {vehicle}?",
     }
     return queries.get(topic, f"Tell me about Hyundai {vehicle}")
@@ -897,7 +963,7 @@ def enrich_search_query(message: str, ctx: dict[str, Any]) -> str:
     if vehicle:
         if detect_topic(message) == "compare":
             return _compare_search_query(message, ctx)
-        if "tell me about" in lower or re.search(
+        if _has_about_intent(lower) or "tell me about" in lower or re.search(
             r"\b(detail|details|more\s+info|more\s+information)\b", lower
         ):
             return f"Tell me about Hyundai {vehicle}"

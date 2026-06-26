@@ -58,6 +58,7 @@ TOPIC_SIGNALS: dict[str, list[str]] = {
     "seats": ["seat", "seater", "seating", "capacity"],
     "compare": ["compare", "comparison", "versus", " vs "],
     "features": ["feature", "specification", "spec", "detail", "details", "about"],
+    "about": ["tell me about", "about", "know about", "learn about"],
     "booking": ["test drive", "book", "booking", "slot", "schedule"],
     "service": ["warranty", "service"],
 }
